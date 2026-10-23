@@ -355,7 +355,8 @@ function DeskPage() {
 
         <div className="space-y-4 lg:col-span-7">
           {/* KPIs */}
-          <div className={cn(show("deal"), "grid grid-cols-1 gap-3 sm:grid-cols-3")}>
+          <div className={show("deal")}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Kpi
               icon={<Wallet className="h-4 w-4" />}
               label="Loan payment"
@@ -366,7 +367,7 @@ function DeskPage() {
               icon={<Fuel className="h-4 w-4" />}
               label="Running costs"
               value={`${sim.opSavings >= 0 ? "Saves" : "Adds"} ${money(Math.abs(sim.opSavings))}/mo`}
-              sub={`Gas ${signedMoney(-sim.gasSave)} · Maint ${signedMoney(-sim.maintSave)}`}
+              sub={`Gas ${sim.gasSave >= 0 ? "saves " : "+"}${money(Math.abs(sim.gasSave))} · Maint ${sim.maintSave >= 0 ? "saves " : "+"}${money(Math.abs(sim.maintSave))}`}
               tone={sim.opSavings >= 0 ? "gain" : "cost"}
             />
             <Kpi
@@ -377,6 +378,7 @@ function DeskPage() {
               tone={sim.trueDelta >= 0 ? "gain" : "cost"}
               highlight
             />
+          </div>
           </div>
 
           {/* Compare */}
