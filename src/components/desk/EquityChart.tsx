@@ -36,7 +36,7 @@ export function EquityChart({ series, month, breakeven, onScrub }: Props) {
     onScrub(Math.min(term, Math.max(1, m)));
   };
 
-  const yTicks = [0, 0.25, 0.5, 0.75].map((f) => (maxY / 1.06) * f + (f === 0 ? 0 : 0));
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => (maxY / 1.06) * f);
   const years = Array.from({ length: Math.floor(term / 12) }, (_, i) => (i + 1) * 12);
 
   return (
