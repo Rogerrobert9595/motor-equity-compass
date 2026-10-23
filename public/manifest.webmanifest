@@ -1,0 +1,16 @@
+{
+  "name": "Deal Desk – Ownership & Equity Twin",
+  "short_name": "Deal Desk",
+  "description": "Compare a customer's current car with any stock unit: payment, fuel, maintenance and equity crossover.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1222",
+  "theme_color": "#0b1222",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
