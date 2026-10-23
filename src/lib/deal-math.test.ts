@@ -50,7 +50,7 @@ describe("deal math", () => {
 describe("pasted sheet rows", () => {
   it("reads a tab-separated row copied from column A", () => {
     const row = ["1", "S", "2-48134", "2026", "Buick Encore GX", "AWD Preferred", "11,604", "$23,999", "39", "S", "KL4AMCSL0TB008832", "", "27", "58"].join("\t");
-    const [v] = parsePastedRows(row);
+    const v = parsePastedRows(row)[0]!;
     expect(v.stock).toBe("2-48134");
     expect(v.loc).toBe("S");
     expect(v.miles).toBe(11604);

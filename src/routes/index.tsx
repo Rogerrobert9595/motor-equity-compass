@@ -53,7 +53,7 @@ const TERMS = [48, 60, 72, 84];
 function DeskPage() {
   const [inventory, setInventory] = useState<Vehicle[]>(SAMPLE_INVENTORY);
   const [source, setSource] = useState("Sample units");
-  const [selected, setSelected] = useState<Vehicle>(SAMPLE_INVENTORY[0]);
+  const [selected, setSelected] = useState<Vehicle>(SAMPLE_INVENTORY[0]!);
   const [deal, setDeal] = useState<DealInputs>({ price: 23999, down: 2500, apr: 6.9, term: 72, taxFees: 1950, mpg: 27, maint: 58 });
   const [current, setCurrent] = useState<CurrentInputs>({ commute: 42, currPay: 310, currMpg: 18, currMaint: 165, gasPrice: 3.45, insDelta: 18 });
   const [scrub, setScrub] = useState(36);
@@ -137,7 +137,7 @@ function DeskPage() {
 
   const sim = useMemo(() => simulate(deal, current, selected.miles), [deal, current, selected.miles]);
   const month = Math.min(Math.max(1, scrub), deal.term);
-  const point = sim.series[month];
+  const point = sim.series[month] ?? sim.series[sim.series.length - 1]!;
   const odo = Math.round(selected.miles + (sim.annualMiles * month) / 12);
   const title = `${selected.year} ${selected.makeModel} ${selected.desc}`.trim();
 
@@ -434,7 +434,7 @@ function DeskPage() {
                   {point.equity >= 0 ? `+${money(point.equity)} equity` : `${money(point.equity)} upside down`}
                 </strong>
               </div>
-              <Slider aria-label="Month" className="my-4 py-2" value={[month]} min={1} max={deal.term} step={1} onValueChange={([v]) => setScrub(v)} />
+              <Slider aria-label="Month" className="my-4 py-2" value={[month]} min={1} max={deal.term} step={1} onValueChange={([v]) => setScrub(v ?? 1)} />
               <div className="grid grid-cols-3 gap-2 text-center">
                 <Stat label="Est. value" value={money(point.value)} className="text-gain" />
                 <Stat label="Loan payoff" value={money(point.balance)} className="text-cost" />
@@ -519,7 +519,7 @@ function NavBtn({ active, onClick, icon, label }: { active: boolean; onClick: ()
   );
 }
 
-function Chip({ icon, label, value, sub }: { icon: ReactNode; label: string; value: string; sub?: string }) {
+function Chip({ icon, label, value, sub }: { icon: ReactNode; label: string; value: string; sub?: string | undefined }) {
   return (
     <div className="rounded-xl border border-border bg-background/50 p-2.5">
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -567,15 +567,17 @@ function CompareBars({ rows }: { rows: BarRow[] }) {
   const max = Math.max(1, ...totals);
   return (
     <div className="space-y-5">
-      {rows.map((r, i) => (
+      {rows.map((r, i) => {
+        const total = totals[i] ?? 0;
+        return (
         <div key={r.label}>
           <div className="mb-1.5 flex items-baseline justify-between">
             <span className="text-sm font-medium">{r.label}</span>
-            <span className="num text-lg font-bold">{money(totals[i])}<span className="text-xs text-muted-foreground">/mo</span></span>
+            <span className="num text-lg font-bold">{money(total)}<span className="text-xs text-muted-foreground">/mo</span></span>
           </div>
-          <div className="flex h-7 overflow-hidden rounded-lg bg-muted" style={{ width: `${(totals[i] / max) * 100}%` }}>
+          <div className="flex h-7 overflow-hidden rounded-lg bg-muted" style={{ width: `${(total / max) * 100}%` }}>
             {r.parts.map((p) =>
-              p.v > 0 ? <div key={p.k} className={cn(p.c, "h-full")} style={{ width: `${(p.v / totals[i]) * 100}%` }} title={`${p.k} ${money(p.v)}`} /> : null,
+              p.v > 0 ? <div key={p.k} className={cn(p.c, "h-full")} style={{ width: `${(p.v / (total || 1)) * 100}%` }} title={`${p.k} ${money(p.v)}`} /> : null,
             )}
           </div>
           <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
@@ -587,7 +589,8 @@ function CompareBars({ rows }: { rows: BarRow[] }) {
             ))}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

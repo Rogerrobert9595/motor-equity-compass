@@ -77,7 +77,7 @@ export function SliderField({ min, max, step, hint, ...input }: SliderFieldProps
         min={min}
         max={max}
         step={step}
-        onValueChange={([v]) => input.onChange(v)}
+        onValueChange={([v]) => v !== undefined && input.onChange(v)}
         className="py-2"
       />
     </div>

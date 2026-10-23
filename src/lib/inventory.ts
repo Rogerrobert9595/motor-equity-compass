@@ -77,9 +77,25 @@ export function parsePastedRows(text: string): Vehicle[] {
 }
 
 /** Normalise the JSON served by the Apps Script doGet endpoint. */
+interface RawUnit {
+  stock?: unknown;
+  loc?: unknown;
+  year?: unknown;
+  makeModel?: unknown;
+  model?: unknown;
+  desc?: unknown;
+  miles?: unknown;
+  price?: unknown;
+  days?: unknown;
+  stat?: unknown;
+  vin?: unknown;
+  epaMpg?: unknown;
+  estMaint?: unknown;
+}
+
 export function normalizeSheetJson(json: unknown): Vehicle[] {
-  const obj = (json ?? {}) as Record<string, unknown>;
-  const list = (Array.isArray(json) ? json : obj.vehicles ?? obj.units ?? []) as Record<string, unknown>[];
+  const obj = (json ?? {}) as { vehicles?: unknown; units?: unknown };
+  const list = (Array.isArray(json) ? json : (obj.vehicles ?? obj.units ?? [])) as RawUnit[];
   if (!Array.isArray(list)) return [];
   return list
     .map((u) => ({

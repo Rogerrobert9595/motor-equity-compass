@@ -21,10 +21,11 @@ export function EquityChart({ series, month, breakeven, onScrub }: Props) {
   const dragging = useRef(false);
   const term = Math.max(1, series.length - 1);
   const maxY = Math.max(1, ...series.map((p) => Math.max(p.value, p.balance))) * 1.06;
-  const x = (m: number) => L + (m / term) * (W - L - R);
-  const y = (v: number) => T + (1 - v / maxY) * (H - T - B);
+  // Rounded so server and browser render identical coordinates.
+  const x = (m: number) => Math.round((L + (m / term) * (W - L - R)) * 10) / 10;
+  const y = (v: number) => Math.round((T + (1 - v / maxY) * (H - T - B)) * 10) / 10;
   const line = (k: "value" | "balance") =>
-    series.map((p, i) => `${i ? "L" : "M"}${x(p.month).toFixed(1)},${y(p[k]).toFixed(1)}`).join("");
+    series.map((p, i) => `${i ? "L" : "M"}${x(p.month)},${y(p[k])}`).join("");
   const valueArea = `${line("value")}L${x(term)},${y(0)}L${x(0)},${y(0)}Z`;
   const p = series[Math.min(month, term)];
 
@@ -84,7 +85,7 @@ export function EquityChart({ series, month, breakeven, onScrub }: Props) {
       {breakeven !== null && breakeven > 0 && (
         <g>
           <line x1={x(breakeven)} x2={x(breakeven)} y1={T} y2={H - B} className="stroke-gain/60" strokeDasharray="4 4" />
-          <circle cx={x(breakeven)} cy={y(series[breakeven].value)} r={4} className="fill-background stroke-gain" strokeWidth={2} />
+          <circle cx={x(breakeven)} cy={y(series[breakeven]?.value ?? 0)} r={4} className="fill-background stroke-gain" strokeWidth={2} />
         </g>
       )}
 
