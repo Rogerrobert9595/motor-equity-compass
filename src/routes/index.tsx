@@ -88,7 +88,7 @@ function DeskPage() {
       setVinStatus(s.source);
       if (s.source === "none") return;
       setSelected((cur) =>
-        cur.stock === v.stock ? { ...cur, cityMpg: s.cityMpg, hwyMpg: s.hwyMpg, engine: s.engine ?? cur.engine } : cur,
+        cur.stock === v.stock ? { ...cur, cityMpg: s.cityMpg, hwyMpg: s.hwyMpg, engine: s.engine ?? cur.engine ?? null } : cur,
       );
       setDeal((d) => ({
         ...d,
