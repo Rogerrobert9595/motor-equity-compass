@@ -70,3 +70,17 @@ describe("pasted sheet rows", () => {
     expect(findByStock(list, "78825")?.stock).toBe("1-78825NA");
   });
 });
+
+describe("current car estimates", () => {
+  it("assumes 12,000 miles per year of age when mileage isn't picked", async () => {
+    const { assumedMiles } = await import("./deal-math");
+    expect(assumedMiles(2015, 2026)).toBe(132000);
+    expect(assumedMiles(2026, 2026)).toBe(12000);
+  });
+
+  it("estimates repairs from the mileage bucket", async () => {
+    const { MILEAGE_BUCKETS } = await import("./deal-math");
+    // Ford, 125–150k bucket (137,500 mi): 710 × (1 + 3.3125 × 0.5) ÷ 12 ≈ $157/mo
+    expect(estimateMaint("Ford", MILEAGE_BUCKETS[5].miles)).toBe(157);
+  });
+});

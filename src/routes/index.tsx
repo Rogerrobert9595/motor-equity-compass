@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { CurrentCarLookup } from "@/components/desk/CurrentCarLookup";
 import { EquityChart } from "@/components/desk/EquityChart";
 import { Field, money, num, NumInput, Panel, signedMoney, SliderField } from "@/components/desk/fields";
 import { InventoryPanel } from "@/components/desk/InventoryPanel";
@@ -361,6 +362,11 @@ function DeskPage() {
           {/* Current car */}
           <Panel title="Customer's current car" kicker="Today" className={show("costs")}>
             <div className="space-y-6">
+              <CurrentCarLookup
+                onEstimate={({ mpg, maint }) =>
+                  setCurrent((c) => ({ ...c, currMpg: mpg ?? c.currMpg, currMaint: maint }))
+                }
+              />
               <SliderField
                 label="Daily driving"
                 value={current.commute}
