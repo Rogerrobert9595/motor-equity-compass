@@ -148,9 +148,9 @@ export function InventoryPanel({ open, onOpenChange, inventory, source, selected
 
           <TabsContent value="sheet" className="mt-0 space-y-4 overflow-y-auto px-5 py-4">
             <p className="text-sm text-muted-foreground">
-              Paste your Google Apps Script web app link. In Apps Script use <b className="text-foreground">Deploy → New deployment → Web app</b>, set
-              <b className="text-foreground"> Execute as: Me</b> and <b className="text-foreground">Who has access: Anyone</b>, then copy the link ending in
-              <span className="num text-foreground"> /exec</span>.
+              The app loads the shared sheet from this link every time it opens. The script must be deployed as a web app with
+              <b className="text-foreground"> Execute as: Me</b> and <b className="text-foreground">Who has access: Anyone</b>. Only change the link if
+              you made a brand-new deployment.
             </p>
             <Input value={url} onChange={(e) => setUrl(e.target.value)} className="num h-11 text-sm" placeholder="https://script.google.com/macros/s/…/exec" />
             {url.trim().endsWith("/dev") && (
@@ -161,6 +161,11 @@ export function InventoryPanel({ open, onOpenChange, inventory, source, selected
               Sync from sheet
             </Button>
             {syncError && <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">{syncError}</p>}
+            {url.trim() !== SHARED_SHEET_URL && (
+              <Button variant="ghost" className="w-full text-muted-foreground" onClick={() => setUrl(SHARED_SHEET_URL)}>
+                <RotateCcw className="h-4 w-4" /> Use the shared sheet link
+              </Button>
+            )}
           </TabsContent>
 
           <TabsContent value="paste" className="mt-0 space-y-3 overflow-y-auto px-5 py-4">
