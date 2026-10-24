@@ -13,5 +13,5 @@
 - Single-screen deal desk at `/`; phone tabs (Deal/Costs/Equity) are CSS visibility toggles, desktop shows all panels — keeps one source of state.
 - All deal/ownership math lives in `src/lib/deal-math.ts` as pure functions with tests beside it — so numbers stay verifiable and UI-free.
 - External lookups (Google Apps Script sheet feed, NHTSA, EPA fueleconomy.gov) go through server functions in `src/lib/vehicle.functions.ts` — avoids browser CORS limits; sheet fetch is restricted to script.google.com hosts to prevent open-proxy abuse.
-- Inventory is device-local (localStorage) with bundled sample units; no backend — the Google Sheet is the source of truth.
+- Inventory auto-loads from the shared Apps Script endpoint (`src/lib/sheet-config.ts`) on every app open; last good list is cached in localStorage with bundled sample units as fallback; no backend — the Google Sheet is the source of truth.
 - Installable via web manifest only (no service worker) — home-screen install without stale-cache risk.
