@@ -10,13 +10,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { parsePastedRows, SAMPLE_INVENTORY, type Vehicle } from "@/lib/inventory";
+import { getSheetUrl, saveSheetUrl, SHARED_SHEET_URL } from "@/lib/sheet-config";
 import { cn } from "@/lib/utils";
 import { fetchSheetInventory } from "@/lib/vehicle.functions";
 
 import { money, num } from "./fields";
-
-const DEFAULT_SHEET_URL =
-  "https://script.google.com/macros/s/AKfycbydnekfH2pMyWo2mqBYPuHX5Sp9HQ4uR5D48WA3dgB4/exec";
 
 interface Props {
   open: boolean;
@@ -24,23 +22,27 @@ interface Props {
   inventory: Vehicle[];
   source: string;
   selectedStock: string;
+  sheetError: string | null;
   onSelect: (v: Vehicle) => void;
   onReplace: (list: Vehicle[], source: string) => void;
 }
 
-export function InventoryPanel({ open, onOpenChange, inventory, source, selectedStock, onSelect, onReplace }: Props) {
+export function InventoryPanel({ open, onOpenChange, inventory, source, selectedStock, sheetError, onSelect, onReplace }: Props) {
   const isMobile = useIsMobile();
   const [filter, setFilter] = useState("");
-  const [url, setUrl] = useState(DEFAULT_SHEET_URL);
+  const [url, setUrl] = useState(SHARED_SHEET_URL);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [paste, setPaste] = useState("");
   const sync = useServerFn(fetchSheetInventory);
 
   useEffect(() => {
-    const saved = localStorage.getItem("desk.sheetUrl");
-    if (saved) setUrl(saved);
+    setUrl(getSheetUrl());
   }, []);
+
+  useEffect(() => {
+    setSyncError(sheetError);
+  }, [sheetError]);
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -53,7 +55,7 @@ export function InventoryPanel({ open, onOpenChange, inventory, source, selected
   const runSync = async () => {
     setSyncing(true);
     setSyncError(null);
-    localStorage.setItem("desk.sheetUrl", url.trim());
+    saveSheetUrl(url);
     try {
       const res = await sync({ data: { url: url.trim() } });
       if (res.error) {
