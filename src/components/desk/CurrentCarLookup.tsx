@@ -8,12 +8,16 @@ import { assumedMiles, estimateMaint, MILEAGE_BUCKETS } from "@/lib/deal-math";
 import { cn } from "@/lib/utils";
 import { decodeVin, getEpaMenu, getEpaVehicle } from "@/lib/vehicle.functions";
 
+import { CarSources } from "./CarSources";
+
 type Item = { text: string; value: string };
 type Mode = "vin" | "pick";
 
 interface Found {
   year: number | null;
   make: string;
+  model: string;
+  vin: string | null;
   label: string;
   mpg: number | null;
   mpgSource: "epa" | "estimate" | null;
@@ -22,6 +26,8 @@ interface Found {
 interface Props {
   /** Called with the estimated MPG (when found) and monthly repairs for the customer's car. */
   onEstimate: (est: { mpg: number | null; maint: number }) => void;
+  /** Customer's yearly driving, for the AAA per-mile benchmark. */
+  milesPerYear: number;
 }
 
 const THIS_YEAR = new Date().getFullYear();
@@ -67,7 +73,7 @@ function NativeSelect({
   );
 }
 
-export function CurrentCarLookup({ onEstimate }: Props) {
+export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
   const [mode, setMode] = useState<Mode>("vin");
   const [vin, setVin] = useState("");
   const [year, setYear] = useState("");
@@ -144,7 +150,7 @@ export function CurrentCarLookup({ onEstimate }: Props) {
     if (md) {
       void loadList("options", year, make, md);
       // Repairs can be estimated as soon as the model is known; MPG fills in with the trim.
-      setFound({ year: Number(year), make, label: `${year} ${make} ${md}`, mpg: null, mpgSource: null });
+      setFound({ year: Number(year), make, model: md, vin: null, label: `${year} ${make} ${md}`, mpg: null, mpgSource: null });
     }
   };
 
@@ -161,6 +167,8 @@ export function CurrentCarLookup({ onEstimate }: Props) {
     setFound({
       year: Number(year),
       make,
+      model,
+      vin: null,
       label: `${year} ${make} ${model} · ${trimText}`,
       mpg: res.combMpg ?? null,
       mpgSource: res.combMpg ? "epa" : null,
@@ -186,6 +194,8 @@ export function CurrentCarLookup({ onEstimate }: Props) {
     setFound({
       year: s.year || null,
       make: s.make,
+      model: s.model ?? "",
+      vin: v,
       label: [s.year || "", s.make, s.model, s.engine ? `· ${s.engine}` : ""].filter(Boolean).join(" "),
       mpg: s.combMpg,
       mpgSource: s.source === "epa" ? "epa" : "estimate",
@@ -303,6 +313,18 @@ export function CurrentCarLookup({ onEstimate }: Props) {
             </div>
           </div>
         </div>
+      )}
+
+      {found && (
+        <CarSources
+          year={found.year}
+          make={found.make}
+          model={found.model}
+          vin={found.vin}
+          odometer={miles?.miles ?? null}
+          milesPerYear={milesPerYear}
+          mpgSource={found.mpgSource}
+        />
       )}
     </div>
   );
