@@ -108,6 +108,33 @@
   --sidebar-ring: oklch(0.9 0.21 128);
 }
 
+/* Printed / "Save as PDF" summaries use a light sheet so text survives without backgrounds. */
+@media print {
+  :root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.2 0.03 262);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.2 0.03 262);
+    --muted: oklch(0.95 0.01 262);
+    --muted-foreground: oklch(0.45 0.03 262);
+    --border: oklch(0.2 0.03 262 / 18%);
+    --primary: oklch(0.5 0.15 135);
+    --gain: oklch(0.5 0.15 140);
+    --cost: oklch(0.55 0.15 60);
+    --loss: oklch(0.5 0.19 25);
+  }
+  html {
+    color-scheme: light;
+  }
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  @page {
+    margin: 14mm;
+  }
+}
+
 @layer base {
   * {
     border-color: var(--color-border);
