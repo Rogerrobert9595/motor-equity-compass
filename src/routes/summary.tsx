@@ -11,7 +11,7 @@ import { decodeSummary } from "@/lib/summary-link";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/summary")({
-  validateSearch: (s: Record<string, unknown>) => ({ d: typeof s.d === "string" ? s.d : "" }),
+  validateSearch: (s: Record<string, unknown>) => ({ d: typeof s["d"] === "string" ? s["d"] : "" }),
   head: () => ({
     meta: [
       { title: "Your Deal Summary – Deal Desk" },
