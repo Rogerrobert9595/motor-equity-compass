@@ -40,6 +40,7 @@ export const fetchSheetInventory = createServerFn({ method: "POST" })
   );
 
 interface VinSpecs {
+  year: number | null;
   make: string | null;
   model: string | null;
   engine: string | null;
@@ -58,6 +59,49 @@ async function getJson(url: string): Promise<any> {
 
 const asList = (x: any) => (Array.isArray(x) ? x : x ? [x] : []);
 
+const EPA_MENU = "https://www.fueleconomy.gov/ws/rest/vehicle/menu";
+
+/** Year → make → model → trim lists from fueleconomy.gov for the current-car picker. */
+export const getEpaMenu = createServerFn({ method: "POST" })
+  .inputValidator((data) =>
+    z
+      .object({
+        level: z.enum(["make", "model", "options"]),
+        year: z.number().int().min(1984).max(2100),
+        make: z.string().max(60).optional(),
+        model: z.string().max(120).optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data }): Promise<{ items: { text: string; value: string }[]; error: string | null }> => {
+    const q = new URLSearchParams({ year: String(data.year) });
+    if (data.level !== "make") q.set("make", data.make ?? "");
+    if (data.level === "options") q.set("model", data.model ?? "");
+    try {
+      const json = await getJson(`${EPA_MENU}/${data.level}?${q}`);
+      const items = asList(json?.menuItem).map((x: any) => ({ text: String(x.text), value: String(x.value) }));
+      return { items, error: null };
+    } catch (err) {
+      console.error("EPA menu failed", err);
+      return { items: [], error: "Couldn't load the list. Check the connection and try again." };
+    }
+  });
+
+/** EPA MPG for one trim (id from the options list). */
+export const getEpaVehicle = createServerFn({ method: "POST" })
+  .inputValidator((data) => z.object({ id: z.string().regex(/^\d{1,8}$/) }).parse(data))
+  .handler(async ({ data }): Promise<{ combMpg: number | null; cityMpg: number | null; hwyMpg: number | null }> => {
+    try {
+      const veh = await getJson(`https://www.fueleconomy.gov/ws/rest/vehicle/${data.id}`);
+      const comb = parseInt(veh?.comb08);
+      if (!(comb > 0)) return { combMpg: null, cityMpg: null, hwyMpg: null };
+      return { combMpg: comb, cityMpg: parseInt(veh.city08) || null, hwyMpg: parseInt(veh.highway08) || null };
+    } catch (err) {
+      console.error("EPA vehicle failed", err);
+      return { combMpg: null, cityMpg: null, hwyMpg: null };
+    }
+  });
+
 export const decodeVin = createServerFn({ method: "POST" })
   .inputValidator((data) =>
     z
@@ -65,7 +109,7 @@ export const decodeVin = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data }): Promise<VinSpecs> => {
-    const empty: VinSpecs = { make: null, model: null, engine: null, combMpg: null, cityMpg: null, hwyMpg: null, estMaint: null, source: "none" };
+    const empty: VinSpecs = { year: null, make: null, model: null, engine: null, combMpg: null, cityMpg: null, hwyMpg: null, estMaint: null, source: "none" };
     let v: any;
     try {
       const nhtsa = await getJson(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${data.vin}?format=json`);
@@ -105,6 +149,7 @@ export const decodeVin = createServerFn({ method: "POST" })
           const comb = parseInt(veh.comb08);
           if (comb > 0) {
             return {
+              year,
               make,
               model,
               engine,
@@ -122,5 +167,5 @@ export const decodeVin = createServerFn({ method: "POST" })
     }
 
     const est = estimateMpg(cyl, displ, drive);
-    return { make, model, engine, combMpg: est, cityMpg: est - 2, hwyMpg: est + 3, estMaint, source: "estimate" };
+    return { year, make, model, engine, combMpg: est, cityMpg: est - 2, hwyMpg: est + 3, estMaint, source: "estimate" };
   });
