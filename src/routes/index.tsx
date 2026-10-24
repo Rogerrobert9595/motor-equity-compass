@@ -211,7 +211,13 @@ function DeskPage() {
             <img src="/icons/icon-192.png" alt="" width={36} height={36} className="h-9 w-9 rounded-xl" />
             <div className="min-w-0 flex-1">
               <h1 className="truncate text-base font-semibold leading-tight">Deal Desk</h1>
-              <p className="truncate text-xs text-muted-foreground">Ownership & equity twin · {source}</p>
+              <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+                {sheetStatus === "syncing" && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
+                <span className="truncate">
+                  {sheetStatus === "syncing" ? "Loading shared sheet…" : source}
+                  {sheetStatus === "error" && " · sheet offline"}
+                </span>
+              </p>
             </div>
             <Button variant="secondary" size="sm" className="h-10" onClick={() => setPanelOpen(true)}>
               <Warehouse className="h-4 w-4" />
@@ -532,8 +538,9 @@ function DeskPage() {
         inventory={inventory}
         source={source}
         selectedStock={selected.stock}
+        sheetError={sheetError}
         onSelect={(v) => applyVehicle(v)}
-        onReplace={replaceInventory}
+        onReplace={(list, src) => replaceInventory(list, src)}
       />
     </div>
   );
