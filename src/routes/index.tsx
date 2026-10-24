@@ -636,7 +636,7 @@ function DeskPage() {
                 <p className="mt-2 text-xs text-muted-foreground">
                   <span className="mr-1 inline-block h-0.5 w-4 border-t-2 border-dashed border-muted-foreground align-middle" />
                   Pinned: {pinned.term} mo, {money(pinned.payment)}/mo,{" "}
-                  {pinned.breakeven != null ? `equity at month ${pinned.breakeven}` : "upside down"}
+                  {pinned.breakeven === 0 ? "equity from day one" : pinned.breakeven != null ? `equity at month ${pinned.breakeven}` : "upside down"}
                   {pinned.breakeven != null && sim.breakevenMonth != null && pinned.breakeven !== sim.breakevenMonth && (
                     <strong className={cn("ml-1", sim.breakevenMonth < pinned.breakeven ? "text-gain" : "text-loss")}>
                       → now month {sim.breakevenMonth} ({Math.abs(pinned.breakeven - sim.breakevenMonth)} months{" "}

@@ -125,7 +125,9 @@ function SummaryPage() {
           <span className="flex items-center gap-1.5"><i className="h-2 w-4 rounded-full bg-gain" /> Est. trade value</span>
           <span className="flex items-center gap-1.5"><i className="h-2 w-4 rounded-full bg-cost" /> Loan payoff</span>
         </div>
-        <EquityChart series={sim.series} month={mark} breakeven={sim.breakevenMonth} />
+        <div className="print:mx-auto print:w-3/4">
+          <EquityChart series={sim.series} month={mark} breakeven={sim.breakevenMonth} />
+        </div>
       </Card>
 
       <p className="text-[11px] leading-relaxed text-muted-foreground">
