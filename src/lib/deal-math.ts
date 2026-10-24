@@ -201,8 +201,8 @@ export const SERVICE_MILESTONES = [
   { at: 30000, label: "30k service", items: "fluids, filters, brake inspection" },
   { at: 60000, label: "60k service", items: "brakes, battery, transmission fluid, coolant" },
   { at: 90000, label: "90k service", items: "timing belt (if equipped), spark plugs, hoses" },
-  { at: 100000, label: "100k+", items: "water pump, shocks/struts, suspension parts" },
-  { at: 150000, label: "150k+", items: "higher odds of engine or transmission repairs" },
+  { at: 100000, label: "100k service", items: "water pump, shocks/struts, suspension parts" },
+  { at: 150000, label: "150k mark", items: "higher odds of engine or transmission repairs" },
 ] as const;
 
 /** The last milestone the car has reached and the next one ahead of it. */
