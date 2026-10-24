@@ -149,6 +149,7 @@ export const decodeVin = createServerFn({ method: "POST" })
           const comb = parseInt(veh.comb08);
           if (comb > 0) {
             return {
+              year,
               make,
               model,
               engine,
@@ -166,5 +167,5 @@ export const decodeVin = createServerFn({ method: "POST" })
     }
 
     const est = estimateMpg(cyl, displ, drive);
-    return { make, model, engine, combMpg: est, cityMpg: est - 2, hwyMpg: est + 3, estMaint, source: "estimate" };
+    return { year, make, model, engine, combMpg: est, cityMpg: est - 2, hwyMpg: est + 3, estMaint, source: "estimate" };
   });
