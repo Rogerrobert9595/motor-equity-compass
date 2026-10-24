@@ -145,3 +145,20 @@ export function estimateMpg(cylinders: number, displacementL: number, drive: str
 export function makeFromModel(makeModel: string): string {
   return (makeModel.split(/\s+/)[0] || "").toUpperCase();
 }
+
+/** Mileage choices for the customer's current car; `miles` is the value used for estimates. */
+export const MILEAGE_BUCKETS = [
+  { label: "Under 25,000", miles: 15000 },
+  { label: "25,000 – 50,000", miles: 37500 },
+  { label: "50,000 – 75,000", miles: 62500 },
+  { label: "75,000 – 100,000", miles: 87500 },
+  { label: "100,000 – 125,000", miles: 112500 },
+  { label: "125,000 – 150,000", miles: 137500 },
+  { label: "150,000 – 200,000", miles: 175000 },
+  { label: "200,000+", miles: 215000 },
+] as const;
+
+/** When mileage isn't picked, assume 12,000 miles a year of age (minimum one year). */
+export function assumedMiles(modelYear: number, currentYear: number): number {
+  return Math.max(1, currentYear - modelYear) * 12000;
+}
