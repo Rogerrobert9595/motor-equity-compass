@@ -15,3 +15,4 @@
 - External lookups (Google Apps Script sheet feed, NHTSA, EPA fueleconomy.gov) go through server functions in `src/lib/vehicle.functions.ts` — avoids browser CORS limits; sheet fetch is restricted to script.google.com hosts to prevent open-proxy abuse.
 - Inventory auto-loads from the shared Apps Script endpoint (`src/lib/sheet-config.ts`) on every app open; last good list is cached in localStorage with bundled sample units as fallback; no backend — the Google Sheet is the source of truth.
 - Installable via web manifest only (no service worker) — home-screen install without stale-cache risk.
+- Customer "Share summary" links encode only deal inputs into `/summary?d=` (`src/lib/summary-link.ts`) and recompute with deal-math — stateless links with no backend and no internal lot data.

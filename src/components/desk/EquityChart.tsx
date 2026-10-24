@@ -6,7 +6,9 @@ interface Props {
   series: SimPoint[];
   month: number;
   breakeven: number | null;
-  onScrub: (m: number) => void;
+  onScrub?: (m: number) => void;
+  /** A pinned deal to compare against, drawn as dashed lines. */
+  pinned?: { series: SimPoint[]; breakeven: number | null } | null;
 }
 
 const W = 600;
@@ -16,39 +18,42 @@ const R = 12;
 const T = 12;
 const B = 26;
 
-export function EquityChart({ series, month, breakeven, onScrub }: Props) {
+export function EquityChart({ series, month, breakeven, onScrub, pinned }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const dragging = useRef(false);
-  const term = Math.max(1, series.length - 1);
-  const maxY = Math.max(1, ...series.map((p) => Math.max(p.value, p.balance))) * 1.06;
+  const ownTerm = Math.max(1, series.length - 1);
+  const term = Math.max(ownTerm, pinned ? pinned.series.length - 1 : 0);
+  const all = pinned ? [...series, ...pinned.series] : series;
+  const maxY = Math.max(1, ...all.map((p) => Math.max(p.value, p.balance))) * 1.06;
   // Rounded so server and browser render identical coordinates.
   const x = (m: number) => Math.round((L + (m / term) * (W - L - R)) * 10) / 10;
   const y = (v: number) => Math.round((T + (1 - v / maxY) * (H - T - B)) * 10) / 10;
-  const line = (k: "value" | "balance") =>
-    series.map((p, i) => `${i ? "L" : "M"}${x(p.month)},${y(p[k])}`).join("");
-  const valueArea = `${line("value")}L${x(term)},${y(0)}L${x(0)},${y(0)}Z`;
-  const p = series[Math.min(month, term)];
+  const line = (s: SimPoint[], k: "value" | "balance") => s.map((p, i) => `${i ? "L" : "M"}${x(p.month)},${y(p[k])}`).join("");
+  const valueArea = `${line(series, "value")}L${x(ownTerm)},${y(0)}L${x(0)},${y(0)}Z`;
+  const p = series[Math.min(month, ownTerm)];
 
   const scrubFrom = (clientX: number) => {
     const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    if (!rect || !onScrub) return;
     const px = ((clientX - rect.left) / rect.width) * W;
     const m = Math.round(((px - L) / (W - L - R)) * term);
-    onScrub(Math.min(term, Math.max(1, m)));
+    onScrub(Math.min(ownTerm, Math.max(1, m)));
   };
 
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => (maxY / 1.06) * f);
   const years = Array.from({ length: Math.floor(term / 12) }, (_, i) => (i + 1) * 12);
+  const pb = pinned?.breakeven;
 
   return (
     <svg
       ref={svgRef}
       viewBox={`0 0 ${W} ${H}`}
-      className="h-auto w-full cursor-crosshair select-none"
+      className={onScrub ? "h-auto w-full cursor-crosshair select-none" : "h-auto w-full select-none"}
       style={{ touchAction: "pan-y" }}
       role="img"
       aria-label="Vehicle value versus loan balance over the loan term"
       onPointerDown={(e) => {
+        if (!onScrub) return;
         dragging.current = true;
         e.currentTarget.setPointerCapture(e.pointerId);
         scrubFrom(e.clientX);
@@ -78,9 +83,18 @@ export function EquityChart({ series, month, breakeven, onScrub }: Props) {
         </text>
       ))}
 
+      {pinned && (
+        <g className="text-muted-foreground">
+          <path d={line(pinned.series, "balance")} className="fill-none stroke-current" strokeWidth={2} strokeDasharray="6 5" />
+          {pb != null && pb > 0 && (
+            <circle cx={x(pb)} cy={y(pinned.series[pb]?.value ?? 0)} r={4} className="fill-background stroke-current" strokeWidth={2} />
+          )}
+        </g>
+      )}
+
       <path d={valueArea} className="text-gain" fill="url(#valueFill)" />
-      <path d={line("balance")} className="fill-none stroke-cost" strokeWidth={2.5} strokeLinejoin="round" />
-      <path d={line("value")} className="fill-none stroke-gain" strokeWidth={2.5} strokeLinejoin="round" />
+      <path d={line(series, "balance")} className="fill-none stroke-cost" strokeWidth={2.5} strokeLinejoin="round" />
+      <path d={line(series, "value")} className="fill-none stroke-gain" strokeWidth={2.5} strokeLinejoin="round" />
 
       {breakeven !== null && breakeven > 0 && (
         <g>

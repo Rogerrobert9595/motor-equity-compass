@@ -169,3 +169,50 @@ export const decodeVin = createServerFn({ method: "POST" })
     const est = estimateMpg(cyl, displ, drive);
     return { year, make, model, engine, combMpg: est, cityMpg: est - 2, hwyMpg: est + 3, estMaint, source: "estimate" };
   });
+
+export interface SafetyRecords {
+  recalls: number;
+  complaints: number;
+  topComplaints: string[]; // most-reported components
+  error: string | null;
+}
+
+async function nhtsaCounts(make: string, model: string, year: number) {
+  const q = `make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}&modelYear=${year}`;
+  const [rec, comp] = await Promise.all([
+    getJson(`https://api.nhtsa.gov/recalls/recallsByVehicle?${q}`).catch(() => null),
+    getJson(`https://api.nhtsa.gov/complaints/complaintsByVehicle?${q}`).catch(() => null),
+  ]);
+  return { rec, comp };
+}
+
+/** Recall and owner-complaint counts for a model year from NHTSA's public API. */
+export const getSafetyRecords = createServerFn({ method: "POST" })
+  .inputValidator((data) =>
+    z
+      .object({ make: z.string().min(1).max(60), model: z.string().min(1).max(120), year: z.number().int().min(1950).max(2100) })
+      .parse(data),
+  )
+  .handler(async ({ data }): Promise<SafetyRecords> => {
+    // EPA model names carry drive/body suffixes ("RAV4 AWD"); fall back to the first word.
+    const tries = [data.model, data.model.split(/\s+/)[0] ?? ""].filter((m, i, a) => m && a.indexOf(m) === i);
+    let out: SafetyRecords = { recalls: 0, complaints: 0, topComplaints: [], error: "NHTSA didn't respond." };
+    for (const model of tries) {
+      const { rec, comp } = await nhtsaCounts(data.make, model, data.year);
+      if (!rec && !comp) continue;
+      const recalls = Number(rec?.Count ?? rec?.count ?? 0) || 0;
+      const list: any[] = Array.isArray(comp?.results) ? comp.results : [];
+      const complaints = Number(comp?.count ?? comp?.Count ?? list.length) || 0;
+      const tally = new Map<string, number>();
+      for (const c of list) {
+        for (const part of String(c?.components ?? "").split(",")) {
+          const k = part.trim();
+          if (k) tally.set(k, (tally.get(k) ?? 0) + 1);
+        }
+      }
+      const topComplaints = [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k.toLowerCase());
+      out = { recalls, complaints, topComplaints, error: null };
+      if (recalls || complaints) break;
+    }
+    return out;
+  });

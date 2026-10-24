@@ -2,12 +2,29 @@
 
 export interface DealInputs {
   price: number;
-  down: number; // cash down + net trade
+  cash: number; // cash down
+  tradeValue: number; // allowance for the customer's trade
+  tradePayoff: number; // what they still owe on the trade
+  taxRate: number; // sales tax, percent
+  tradeTaxCredit: boolean; // trade allowance lowers the taxable price (NY and most states)
+  fees: number; // title, registration & doc fees rolled into the loan
   apr: number; // percent
   term: number; // months
-  taxFees: number; // tax, title & fees rolled into the loan
   mpg: number;
   maint: number; // $ / month
+}
+
+/** Sales tax, trade tax credit and amount financed for a deal. */
+export function dealTax(deal: Pick<DealInputs, "price" | "cash" | "tradeValue" | "tradePayoff" | "taxRate" | "tradeTaxCredit" | "fees">) {
+  const trade = Math.max(0, deal.tradeValue);
+  const netTrade = trade - Math.max(0, deal.tradePayoff); // negative = rolling in negative equity
+  const rate = Math.max(0, deal.taxRate) / 100;
+  const credited = deal.tradeTaxCredit ? Math.min(deal.price, trade) : 0;
+  const taxable = Math.max(0, deal.price - credited);
+  const salesTax = taxable * rate;
+  const tradeTaxSavings = credited * rate;
+  const financed = Math.max(0, deal.price + salesTax + Math.max(0, deal.fees) - Math.max(0, deal.cash) - netTrade);
+  return { netTrade, taxable, salesTax, tradeTaxSavings, financed };
 }
 
 export interface CurrentInputs {
@@ -65,7 +82,8 @@ export interface SimPoint {
 }
 
 export function simulate(deal: DealInputs, current: CurrentInputs, startMiles: number) {
-  const financed = Math.max(0, deal.price + deal.taxFees - deal.down);
+  const tax = dealTax(deal);
+  const financed = tax.financed;
   const payment = monthlyPayment(financed, deal.apr, deal.term);
   const miles = annualMiles(current.commute);
 
@@ -92,6 +110,9 @@ export function simulate(deal: DealInputs, current: CurrentInputs, startMiles: n
 
   return {
     financed,
+    salesTax: tax.salesTax,
+    tradeTaxSavings: tax.tradeTaxSavings,
+    netTrade: tax.netTrade,
     payment,
     paymentDelta: payment - current.currPay,
     annualMiles: miles,
@@ -161,4 +182,32 @@ export const MILEAGE_BUCKETS = [
 /** When mileage isn't picked, assume 12,000 miles a year of age (minimum one year). */
 export function assumedMiles(modelYear: number, currentYear: number): number {
   return Math.max(1, currentYear - modelYear) * 12000;
+}
+
+/**
+ * AAA "Your Driving Costs" 2025: maintenance, repair & tires for a NEW car,
+ * averaged over 5 years / 75,000 miles across five vehicle classes
+ * (10.23, 11.91, 10.79, 11.64, 11.79 ¢/mi).
+ */
+export const AAA_MAINT_CENTS_PER_MILE = 11.3;
+export const AAA_SOURCE_URL = "https://newsroom.aaa.com/wp-content/uploads/2025/09/AAA-Brochure-Your-Driving-Cost-9.2025.pdf";
+
+export function aaaMonthlyMaint(milesPerYear: number): number {
+  return Math.round((milesPerYear * AAA_MAINT_CENTS_PER_MILE) / 100 / 12);
+}
+
+/** Typical manufacturer service milestones (no dollar amounts — work items only). */
+export const SERVICE_MILESTONES = [
+  { at: 30000, label: "30k service", items: "fluids, filters, brake inspection" },
+  { at: 60000, label: "60k service", items: "brakes, battery, transmission fluid, coolant" },
+  { at: 90000, label: "90k service", items: "timing belt (if equipped), spark plugs, hoses" },
+  { at: 100000, label: "100k service", items: "water pump, shocks/struts, suspension parts" },
+  { at: 150000, label: "150k mark", items: "higher odds of engine or transmission repairs" },
+] as const;
+
+/** The last milestone the car has reached and the next one ahead of it. */
+export function serviceWindow(odometer: number) {
+  const passed = [...SERVICE_MILESTONES].reverse().find((m) => odometer >= m.at) ?? null;
+  const next = SERVICE_MILESTONES.find((m) => odometer < m.at) ?? null;
+  return { passed, next };
 }
