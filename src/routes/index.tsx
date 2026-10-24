@@ -25,8 +25,9 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { estimateMaint, makeFromModel, simulate, type CurrentInputs, type DealInputs } from "@/lib/deal-math";
 import { findByStock, SAMPLE_INVENTORY, type Vehicle } from "@/lib/inventory";
+import { getSheetUrl } from "@/lib/sheet-config";
 import { cn } from "@/lib/utils";
-import { decodeVin } from "@/lib/vehicle.functions";
+import { decodeVin, fetchSheetInventory } from "@/lib/vehicle.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -61,8 +62,11 @@ function DeskPage() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [lookup, setLookup] = useState("");
   const [vinStatus, setVinStatus] = useState<"idle" | "loading" | "epa" | "estimate" | "none">("idle");
+  const [sheetStatus, setSheetStatus] = useState<"idle" | "syncing" | "ok" | "error">("idle");
+  const [sheetError, setSheetError] = useState<string | null>(null);
   const vinReq = useRef(0);
   const decode = useServerFn(decodeVin);
+  const syncSheet = useServerFn(fetchSheetInventory);
 
   const setD = <K extends keyof DealInputs>(k: K) => (v: DealInputs[K]) => setDeal((d) => ({ ...d, [k]: v }));
   const setC = <K extends keyof CurrentInputs>(k: K) => (v: CurrentInputs[K]) => setCurrent((c) => ({ ...c, [k]: v }));
@@ -100,27 +104,57 @@ function DeskPage() {
     }
   };
 
-  // Restore saved inventory on this device.
+  // Show the last saved inventory instantly, then refresh from the shared sheet.
   useEffect(() => {
+    let shown: Vehicle | undefined;
     try {
       const saved = JSON.parse(localStorage.getItem("desk.inventory") || "null");
       if (Array.isArray(saved) && saved.length) {
         setInventory(saved);
         setSource(localStorage.getItem("desk.source") || "Saved units");
+        shown = saved[0];
         applyVehicle(saved[0], false);
       }
     } catch {
       /* ignore bad saved data */
     }
+
+    let cancelled = false;
+    setSheetStatus("syncing");
+    syncSheet({ data: { url: getSheetUrl() } })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.error) {
+          setSheetStatus("error");
+          setSheetError(res.error);
+          return;
+        }
+        setSheetStatus("ok");
+        setSheetError(null);
+        const keep = shown && res.vehicles.find((v) => v.stock === shown!.stock);
+        replaceInventory(res.vehicles, `Sheet: ${res.tabName ?? "live"}`, keep ?? res.vehicles[0]);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSheetStatus("error");
+        setSheetError("Couldn't reach the sheet. Showing the last saved units.");
+      });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const replaceInventory = (list: Vehicle[], src: string) => {
+  const replaceInventory = (list: Vehicle[], src: string, pick: Vehicle | undefined = list[0]) => {
     setInventory(list);
     setSource(src);
     localStorage.setItem("desk.inventory", JSON.stringify(list));
     localStorage.setItem("desk.source", src);
-    if (list[0]) applyVehicle(list[0]);
+    if (src.startsWith("Sheet")) {
+      setSheetStatus("ok");
+      setSheetError(null);
+    }
+    if (pick) applyVehicle(pick);
   };
 
   const handleLookup = () => {
