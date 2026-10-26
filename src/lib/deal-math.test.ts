@@ -11,6 +11,8 @@ import {
   odometerAt,
   serviceWindow,
   simulate,
+  tradeWindow,
+  warrantyCliff,
 } from "./deal-math";
 import { findByStock, parsePastedRows } from "./inventory";
 import { decodeSummary, encodeSummary } from "./summary-link";
