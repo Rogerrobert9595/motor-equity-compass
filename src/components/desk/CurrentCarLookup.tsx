@@ -34,6 +34,15 @@ interface Props {
   milesPerYear: number;
 }
 
+// Change any default fallback estimates like:
+mpg: 25, 
+monthlyRepairs: 120,
+
+// Directly to:
+mpg: 0,
+monthlyRepairs: 0,
+currentPayment: 0,
+
 const THIS_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: THIS_YEAR + 1 - 1990 + 1 }, (_, i) => THIS_YEAR + 1 - i);
 
