@@ -9,6 +9,8 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useAuth } from "@/hooks/use-auth";
+import { saveAccountScriptUrl } from "@/lib/saved-deals";
 import { parsePastedRows, SAMPLE_INVENTORY, type Vehicle } from "@/lib/inventory";
 import { DEFAULT_SCRIPT_URL, getSheetUrl, saveSheetUrl } from "@/lib/sheet-config";
 import { cn } from "@/lib/utils";
@@ -36,6 +38,7 @@ export function InventoryPanel({ open, onOpenChange, inventory, source, selected
   const [justSaved, setJustSaved] = useState(false);
   const [paste, setPaste] = useState("");
   const sync = useServerFn(fetchSheetInventory);
+  const { user } = useAuth();
 
   useEffect(() => {
     setUrl(getSheetUrl());
@@ -64,7 +67,10 @@ export function InventoryPanel({ open, onOpenChange, inventory, source, selected
     if (save) {
       saveSheetUrl(link);
       setJustSaved(true);
-      toast.success("Saved! Syncing inventory…");
+      toast.success(user ? "Saved to your account! Syncing inventory…" : "Saved! Syncing inventory…");
+      if (user) {
+        saveAccountScriptUrl(user.id, link).catch(() => toast.error("Saved on this phone, but not to your account."));
+      }
     }
     setSyncing(true);
     setSyncError(null);

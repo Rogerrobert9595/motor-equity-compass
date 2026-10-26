@@ -10,3 +10,4 @@
 - [x] "Feels like" card: emerald gradient border + glowing badge, biggest number on the row
 - [x] Outflow bars proportional, dashed "back in pocket" ghost block on the new-car bar
 - [x] Equity chart: warranty cliff line + soft-green sweet-spot trade window, tappable
+- [x] Salesperson accounts + saved customers/deals (saved_deals) + account-saved sheet link (user_settings)

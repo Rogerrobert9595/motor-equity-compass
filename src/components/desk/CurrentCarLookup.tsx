@@ -25,7 +25,11 @@ interface Found {
 
 interface Props {
   /** Called with the estimated MPG (when found) and monthly repairs for the customer's car. */
-  onEstimate: (est: { mpg: number | null; maint: number }) => void;
+  onEstimate: (est: {
+    mpg: number | null;
+    maint: number;
+    car: { vin: string | null; year: number | null; make: string; model: string; label: string; miles: number };
+  }) => void;
   /** Customer's yearly driving, for the AAA per-mile benchmark. */
   milesPerYear: number;
 }
@@ -103,7 +107,11 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
   // Push the estimate up whenever the car or mileage changes.
   useEffect(() => {
     if (!found || !miles) return;
-    onEstimate({ mpg: found.mpg, maint: estimateMaint(found.make, miles.miles) });
+    onEstimate({
+      mpg: found.mpg,
+      maint: estimateMaint(found.make, miles.miles),
+      car: { vin: found.vin, year: found.year, make: found.make, model: found.model, label: found.label, miles: miles.miles },
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [found, miles]);
 

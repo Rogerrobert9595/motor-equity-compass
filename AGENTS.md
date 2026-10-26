@@ -13,6 +13,8 @@
 - Single-screen deal desk at `/`; phone tabs (Deal/Costs/Equity) are CSS visibility toggles, desktop shows all panels — keeps one source of state.
 - All deal/ownership math lives in `src/lib/deal-math.ts` as pure functions with tests beside it — so numbers stay verifiable and UI-free.
 - External lookups (Google Apps Script sheet feed, NHTSA, EPA fueleconomy.gov) go through server functions in `src/lib/vehicle.functions.ts` — avoids browser CORS limits; sheet fetch is restricted to script.google.com hosts to prevent open-proxy abuse.
-- Inventory auto-loads on every app open from the Apps Script link saved on the device (localStorage `deal_desk_script_url`), falling back to `DEFAULT_SCRIPT_URL` in `src/lib/sheet-config.ts`; last good list is cached in localStorage with bundled sample units as fallback; no backend — the Google Sheet is the source of truth.
+- Inventory auto-loads on every app open from the Apps Script link saved on the device (localStorage `deal_desk_script_url`), falling back to `DEFAULT_SCRIPT_URL` in `src/lib/sheet-config.ts`; last good list is cached in localStorage with bundled sample units as fallback; the Google Sheet stays the inventory source of truth.
 - Installable via web manifest only (no service worker) — home-screen install without stale-cache risk.
 - Customer "Share summary" links encode only deal inputs into `/summary?d=` (`src/lib/summary-link.ts`) and recompute with deal-math — stateless links with no backend and no internal lot data.
+- Accounts (Lovable Cloud auth: email, Google, Lovable) are optional — the desk works signed-out; signing in unlocks `saved_deals` and `user_settings`, read/written from the browser client (`src/lib/saved-deals.ts`) under own-rows-only RLS, so no server functions are needed.
+- Saved deal JSON shapes (`proposed_vehicle_json`, `trade_vehicle_json`, `deal_structure_json`) are built and parsed only in `src/lib/saved-deals.ts` with zod, so old rows load safely after fields change.
