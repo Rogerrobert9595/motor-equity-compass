@@ -11,6 +11,8 @@ import {
   odometerAt,
   serviceWindow,
   simulate,
+  tradeWindow,
+  warrantyCliff,
 } from "./deal-math";
 import { findByStock, parsePastedRows } from "./inventory";
 import { decodeSummary, encodeSummary } from "./summary-link";
@@ -154,5 +156,38 @@ describe("current car estimates", () => {
     const { MILEAGE_BUCKETS } = await import("./deal-math");
     // Ford, 125–150k bucket (137,500 mi): 710 × (1 + 3.3125 × 0.5) ÷ 12 ≈ $157/mo
     expect(estimateMaint("Ford", MILEAGE_BUCKETS[5].miles)).toBe(157);
+  });
+});
+
+describe("warranty cliff", () => {
+  const oct2026 = { year: 2026, month: 9 };
+  it("ends basic coverage at 36k miles when miles come first", () => {
+    // 2026 model, 11,604 mi, 15,330 mi/yr → 24,396 mi left at 1,277.5/mo → month 20
+    expect(warrantyCliff(2026, 11604, 15330, oct2026)).toEqual({ month: 20, kind: "basic", by: "miles" });
+  });
+  it("ends basic coverage at 36 months when age comes first", () => {
+    // 2025 model in Oct 2026 = 21 months old → 15 months left
+    expect(warrantyCliff(2025, 5000, 6000, oct2026)).toEqual({ month: 15, kind: "basic", by: "age" });
+  });
+  it("falls back to powertrain once basic is gone", () => {
+    expect(warrantyCliff(2023, 40000, 12000, oct2026)?.kind).toBe("powertrain");
+  });
+  it("is null when both coverages are over", () => {
+    expect(warrantyCliff(2019, 90000, 12000, oct2026)).toBeNull();
+  });
+});
+
+describe("trade window", () => {
+  it("runs 12 months from the equity crossover", () => {
+    expect(tradeWindow(24, null, 72)).toEqual({ start: 24, end: 36 });
+  });
+  it("closes early at the warranty cliff", () => {
+    expect(tradeWindow(24, 30, 72)).toEqual({ start: 24, end: 30 });
+  });
+  it("is at least 3 months long", () => {
+    expect(tradeWindow(24, 25, 72)).toEqual({ start: 24, end: 27 });
+  });
+  it("is null when the customer never gets equity", () => {
+    expect(tradeWindow(null, 30, 72)).toBeNull();
   });
 });

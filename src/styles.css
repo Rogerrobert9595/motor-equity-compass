@@ -165,3 +165,12 @@
     display: none;
   }
 }
+
+/* Hero KPI: emerald gradient border + soft glow so "Feels like" is the first number the eye lands on. */
+@utility kpi-hero {
+  border: 1.5px solid transparent;
+  background:
+    linear-gradient(160deg, color-mix(in oklch, var(--gain) 14%, var(--card)), var(--card)) padding-box,
+    linear-gradient(135deg, var(--gain), color-mix(in oklch, var(--gain) 25%, transparent) 55%, var(--gain)) border-box;
+  box-shadow: 0 0 28px -6px color-mix(in oklch, var(--gain) 45%, transparent);
+}

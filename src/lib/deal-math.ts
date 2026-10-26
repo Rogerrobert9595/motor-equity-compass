@@ -211,3 +211,53 @@ export function serviceWindow(odometer: number) {
   const next = SERVICE_MILESTONES.find((m) => odometer < m.at) ?? null;
   return { passed, next };
 }
+
+/** Factory coverage most brands use: bumper-to-bumper 3 yr/36k, powertrain 5 yr/60k. */
+export const WARRANTY = {
+  basic: { months: 36, miles: 36000, label: "Bumper-to-bumper" },
+  powertrain: { months: 60, miles: 60000, label: "Powertrain" },
+} as const;
+
+export interface WarrantyCliff {
+  /** Loan month the coverage runs out (0 = already out at signing). */
+  month: number;
+  kind: keyof typeof WARRANTY;
+  by: "age" | "miles";
+}
+
+/**
+ * Loan month the remaining factory warranty ends, by age or miles (whichever first).
+ * Age is counted from January of the model year — an estimate, since the real
+ * in-service date isn't in the sheet. Returns null when both coverages have already ended.
+ */
+export function warrantyCliff(
+  modelYear: number,
+  startMiles: number,
+  milesPerYear: number,
+  now: { year: number; month: number },
+): WarrantyCliff | null {
+  const ageMonths = Math.max(0, (now.year - modelYear) * 12 + now.month);
+  const perMonth = milesPerYear / 12;
+  for (const kind of ["basic", "powertrain"] as const) {
+    const w = WARRANTY[kind];
+    const byAge = w.months - ageMonths;
+    const byMiles = perMonth > 0 ? Math.ceil((w.miles - startMiles) / perMonth) : Infinity;
+    const month = Math.min(byAge, byMiles);
+    if (month > 0) return { month, kind, by: byAge <= byMiles ? "age" : "miles" };
+  }
+  return null;
+}
+
+/**
+ * Best months to trade: the 12 months after equity turns positive, ending early
+ * if the warranty cliff comes first (but at least 3 months long). Null if never in equity.
+ */
+export function tradeWindow(breakeven: number | null, cliffMonth: number | null, term: number) {
+  if (breakeven == null) return null;
+  const start = Math.max(1, breakeven);
+  if (start >= term) return null;
+  let end = Math.min(term, start + 12);
+  if (cliffMonth != null && cliffMonth > start) end = Math.min(end, cliffMonth);
+  end = Math.min(term, Math.max(end, start + 3));
+  return { start, end };
+}

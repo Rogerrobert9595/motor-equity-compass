@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { ClipboardPaste, Link2, Loader2, RotateCcw, Search } from "lucide-react";
+import { Check, ClipboardPaste, Loader2, RefreshCw, RotateCcw, Save, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { parsePastedRows, SAMPLE_INVENTORY, type Vehicle } from "@/lib/inventory";
-import { getSheetUrl, saveSheetUrl, SHARED_SHEET_URL } from "@/lib/sheet-config";
+import { DEFAULT_SCRIPT_URL, getSheetUrl, saveSheetUrl } from "@/lib/sheet-config";
 import { cn } from "@/lib/utils";
 import { fetchSheetInventory } from "@/lib/vehicle.functions";
 
@@ -30,9 +30,10 @@ interface Props {
 export function InventoryPanel({ open, onOpenChange, inventory, source, selectedStock, sheetError, onSelect, onReplace }: Props) {
   const isMobile = useIsMobile();
   const [filter, setFilter] = useState("");
-  const [url, setUrl] = useState(SHARED_SHEET_URL);
+  const [url, setUrl] = useState(DEFAULT_SCRIPT_URL);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
   const [paste, setPaste] = useState("");
   const sync = useServerFn(fetchSheetInventory);
 
@@ -44,6 +45,12 @@ export function InventoryPanel({ open, onOpenChange, inventory, source, selected
     setSyncError(sheetError);
   }, [sheetError]);
 
+  useEffect(() => {
+    if (!justSaved) return;
+    const t = setTimeout(() => setJustSaved(false), 1800);
+    return () => clearTimeout(t);
+  }, [justSaved]);
+
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return inventory;
@@ -52,12 +59,17 @@ export function InventoryPanel({ open, onOpenChange, inventory, source, selected
     );
   }, [filter, inventory]);
 
-  const runSync = async () => {
+  const runSync = async (save: boolean) => {
+    const link = url.trim();
+    if (save) {
+      saveSheetUrl(link);
+      setJustSaved(true);
+      toast.success("Saved! Syncing inventory…");
+    }
     setSyncing(true);
     setSyncError(null);
-    saveSheetUrl(url);
     try {
-      const res = await sync({ data: { url: url.trim() } });
+      const res = await sync({ data: { url: link } });
       if (res.error) {
         setSyncError(res.error);
       } else {
@@ -148,22 +160,34 @@ export function InventoryPanel({ open, onOpenChange, inventory, source, selected
 
           <TabsContent value="sheet" className="mt-0 space-y-4 overflow-y-auto px-5 py-4">
             <p className="text-sm text-muted-foreground">
-              The app loads the shared sheet from this link every time it opens. The script must be deployed as a web app with
-              <b className="text-foreground"> Execute as: Me</b> and <b className="text-foreground">Who has access: Anyone</b>. Only change the link if
-              you made a brand-new deployment.
+              The app loads your sheet from this link by itself every time it opens. The script must be deployed as a web app with
+              <b className="text-foreground"> Execute as: Me</b> and <b className="text-foreground">Who has access: Anyone</b>. Paste a new link and tap
+              <b className="text-foreground"> Save URL</b> only if you made a brand-new deployment — this phone remembers it.
             </p>
-            <Input value={url} onChange={(e) => setUrl(e.target.value)} className="num h-11 text-sm" placeholder="https://script.google.com/macros/s/…/exec" />
+            <div className="flex gap-2">
+              <Input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                className="num h-11 min-w-0 flex-1 text-sm"
+                placeholder="https://script.google.com/macros/s/…/exec"
+                aria-label="Apps Script link"
+              />
+              <Button onClick={() => void runSync(true)} disabled={syncing || !url.trim()} className="h-11 shrink-0">
+                {justSaved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+                {justSaved ? "Saved!" : "Save URL"}
+              </Button>
+            </div>
             {url.trim().endsWith("/dev") && (
               <p className="text-xs text-cost">Links ending in /dev only work for you while signed in to Google. Use the /exec link.</p>
             )}
-            <Button onClick={runSync} disabled={syncing || !url.trim()} className="h-11 w-full">
-              {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-              Sync from sheet
+            <Button variant="secondary" onClick={() => void runSync(false)} disabled={syncing || !url.trim()} className="h-11 w-full">
+              {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Sync now
             </Button>
             {syncError && <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">{syncError}</p>}
-            {url.trim() !== SHARED_SHEET_URL && (
-              <Button variant="ghost" className="w-full text-muted-foreground" onClick={() => setUrl(SHARED_SHEET_URL)}>
-                <RotateCcw className="h-4 w-4" /> Use the shared sheet link
+            {url.trim() !== DEFAULT_SCRIPT_URL && (
+              <Button variant="ghost" className="w-full text-muted-foreground" onClick={() => setUrl(DEFAULT_SCRIPT_URL)}>
+                <RotateCcw className="h-4 w-4" /> Use the built-in link
               </Button>
             )}
           </TabsContent>

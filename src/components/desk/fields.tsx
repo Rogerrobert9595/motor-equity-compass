@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Pencil } from "lucide-react";
 
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
@@ -23,14 +24,16 @@ export function NumInput({ label, value, onChange, prefix, suffix, decimals = 2,
   return (
     <label
       className={cn(
-        "flex h-11 items-center gap-1 rounded-lg border border-input bg-background/60 px-3 focus-within:border-ring",
+        "group flex h-11 cursor-text items-center gap-1 rounded-lg border border-input bg-background/60 px-3 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30",
         className,
       )}
     >
+      <Pencil className="h-3 w-3 shrink-0 text-muted-foreground/70 group-focus-within:hidden" aria-hidden />
       {prefix && <span className="text-sm text-muted-foreground">{prefix}</span>}
       <input
         type="text"
-        inputMode="decimal"
+        inputMode={decimals > 0 ? "decimal" : "numeric"}
+        enterKeyHint="done"
         aria-label={label}
         className="num w-full min-w-0 bg-transparent text-right text-base font-medium outline-none"
         value={text ?? value.toLocaleString("en-US", { maximumFractionDigits: decimals })}
