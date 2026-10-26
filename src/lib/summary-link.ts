@@ -10,6 +10,7 @@ const schema = z.object({
   v: z.literal(1),
   title: z.string().max(160),
   startMiles: n,
+  modelYear: z.number().int().min(1950).max(2100).optional(),
   deal: z.object({
     price: n,
     cash: n,
@@ -36,6 +37,7 @@ const schema = z.object({
 export interface SummaryPayload {
   title: string;
   startMiles: number;
+  modelYear?: number;
   deal: DealInputs;
   current: CurrentInputs;
 }

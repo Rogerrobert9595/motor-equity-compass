@@ -29,6 +29,7 @@ import { CurrentCarLookup } from "@/components/desk/CurrentCarLookup";
 import { EquityChart } from "@/components/desk/EquityChart";
 import { Field, money, num, NumInput, Panel, signedMoney, SliderField } from "@/components/desk/fields";
 import { InventoryPanel } from "@/components/desk/InventoryPanel";
+import { chartMilestones, MilestoneChips } from "@/components/desk/milestones";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -233,10 +234,14 @@ function DeskPage() {
       }),
     [deal, current, selected.miles],
   );
+  const milestones = useMemo(
+    () => chartMilestones(selected.year, selected.miles, sim.annualMiles, sim.breakevenMonth, deal.term),
+    [selected.year, selected.miles, sim.annualMiles, sim.breakevenMonth, deal.term],
+  );
   const moreDown = useMemo(() => simulate({ ...deal, cash: deal.cash + 1000 }, current, selected.miles), [deal, current, selected.miles]);
 
   const shareSummary = async () => {
-    const code = encodeSummary({ title, startMiles: selected.miles, deal, current });
+    const code = encodeSummary({ title, startMiles: selected.miles, modelYear: selected.year, deal, current });
     const url = `${window.location.origin}/summary?d=${code}`;
     const text = `Here's the summary for the ${title}: ${money(sim.payment)}/mo, feels like ${money(sim.feelsLike)}/mo.`;
     if (navigator.share) {
@@ -531,14 +536,7 @@ function DeskPage() {
               sub={`Gas ${sim.gasSave >= 0 ? "saves " : "+"}${money(Math.abs(sim.gasSave))} · Maint ${sim.maintSave >= 0 ? "saves " : "+"}${money(Math.abs(sim.maintSave))}`}
               tone={sim.opSavings >= 0 ? "gain" : "cost"}
             />
-            <Kpi
-              icon={<LineChart className="h-4 w-4" />}
-              label="Real cash flow"
-              value={`${sim.trueDelta >= 0 ? "Saves" : "Adds"} ${money(Math.abs(sim.trueDelta))}/mo`}
-              sub={`Feels like a ${money(sim.feelsLike)} payment`}
-              tone={sim.trueDelta >= 0 ? "gain" : "cost"}
-              highlight
-            />
+            <FeelsLikeKpi feelsLike={sim.feelsLike} trueDelta={sim.trueDelta} />
           </div>
           </div>
 
@@ -655,8 +653,16 @@ function DeskPage() {
                 )
               )}
             </div>
-            <EquityChart series={sim.series} month={month} breakeven={sim.breakevenMonth} onScrub={setScrub} pinned={pinned} />
-            <p className="mt-1 text-center text-[11px] text-muted-foreground">Drag across the chart or use the slider</p>
+            <EquityChart
+              series={sim.series}
+              month={month}
+              breakeven={sim.breakevenMonth}
+              onScrub={setScrub}
+              pinned={pinned}
+              milestones={milestones}
+            />
+            <p className="mt-1 text-center text-[11px] text-muted-foreground">Drag across the chart, use the slider, or tap a milestone</p>
+            <MilestoneChips m={milestones} onJump={setScrub} active={month} />
 
             <div className="mt-4 rounded-xl border border-border bg-background/50 p-4">
               <div className="flex items-baseline justify-between gap-3">
@@ -775,6 +781,30 @@ function Kpi({ icon, label, value, sub, tone, highlight }: { icon: ReactNode; la
       </div>
       <div className={cn("num mt-2 text-2xl font-bold", tone === "gain" && "text-gain", tone === "cost" && "text-cost")}>{value}</div>
       <div className="mt-1 text-xs text-muted-foreground">{sub}</div>
+    </div>
+  );
+}
+
+function FeelsLikeKpi({ feelsLike, trueDelta }: { feelsLike: number; trueDelta: number }) {
+  const saves = trueDelta >= 0;
+  return (
+    <div className="kpi-hero relative rounded-2xl p-4">
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-gain/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-gain shadow-[0_0_14px_-2px_var(--gain)]">
+          <LineChart className="h-3.5 w-3.5" />
+          Feels like
+        </span>
+      </div>
+      <div className="num mt-2 text-3xl font-extrabold text-gain">
+        {money(feelsLike)}
+        <span className="text-base font-semibold">/mo</span>
+      </div>
+      <div className="mt-1 text-xs text-muted-foreground">
+        Real cash flow{" "}
+        <strong className={cn("num", saves ? "text-gain" : "text-cost")}>
+          {saves ? "saves" : "adds"} {money(Math.abs(trueDelta))}/mo
+        </strong>
+      </div>
     </div>
   );
 }

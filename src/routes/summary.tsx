@@ -4,6 +4,7 @@ import { BadgePercent, Printer } from "lucide-react";
 
 import { CompareBars, FeelsLikeBreakdown } from "@/components/desk/CompareBars";
 import { EquityChart } from "@/components/desk/EquityChart";
+import { chartMilestones, MilestoneChips } from "@/components/desk/milestones";
 import { money } from "@/components/desk/fields";
 import { Button } from "@/components/ui/button";
 import { simulate } from "@/lib/deal-math";
@@ -48,6 +49,9 @@ function SummaryPage() {
   const { deal, current, title } = data;
   const mark = sim.breakevenMonth && sim.breakevenMonth > 0 ? sim.breakevenMonth : Math.min(36, deal.term);
   const saves = sim.trueDelta >= 0;
+  const milestones = data.modelYear
+    ? chartMilestones(data.modelYear, data.startMiles, sim.annualMiles, sim.breakevenMonth, deal.term)
+    : { warranty: null, window: null };
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 px-4 pb-12 pt-[calc(1.25rem+env(safe-area-inset-top))] print:max-w-none print:space-y-3 print:p-0">
@@ -126,8 +130,9 @@ function SummaryPage() {
           <span className="flex items-center gap-1.5"><i className="h-2 w-4 rounded-full bg-cost" /> Loan payoff</span>
         </div>
         <div className="print:mx-auto print:w-3/4">
-          <EquityChart series={sim.series} month={mark} breakeven={sim.breakevenMonth} />
+          <EquityChart series={sim.series} month={mark} breakeven={sim.breakevenMonth} milestones={milestones} />
         </div>
+        <MilestoneChips m={milestones} />
       </Card>
 
       <p className="text-[11px] leading-relaxed text-muted-foreground">
