@@ -37,7 +37,7 @@ const schema = z.object({
 export interface SummaryPayload {
   title: string;
   startMiles: number;
-  modelYear?: number;
+  modelYear?: number | undefined;
   deal: DealInputs;
   current: CurrentInputs;
 }
