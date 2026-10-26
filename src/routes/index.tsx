@@ -179,7 +179,7 @@ function DeskPage() {
       setSheetError(null);
       const keep = keepStock ? res.vehicles.find((v) => v.stock === keepStock) : undefined;
       // Don't overwrite an opened saved deal's numbers when the list refreshes underneath it.
-      const pick = keep && activeDealRef.current && keep.stock === selectedStockRef.current ? undefined : (keep ?? res.vehicles[0]);
+      const pick = keep && activeDealRef.current && keep.stock === selectedStockRef.current ? null : (keep ?? res.vehicles[0] ?? null);
       replaceInventory(res.vehicles, `Sheet: ${res.tabName ?? "live"}`, pick);
     } catch {
       if (id !== syncReq.current) return;
@@ -227,7 +227,7 @@ function DeskPage() {
     current,
   });
 
-  const replaceInventory = (list: Vehicle[], src: string, pick: Vehicle | undefined = list[0]) => {
+  const replaceInventory = (list: Vehicle[], src: string, pick: Vehicle | null = list[0] ?? null) => {
     setInventory(list);
     setSource(src);
     localStorage.setItem("desk.inventory", JSON.stringify(list));
