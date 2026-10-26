@@ -14,7 +14,66 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      saved_deals: {
+        Row: {
+          created_at: string
+          customer_name: string
+          customer_phone: string | null
+          deal_structure_json: Json | null
+          id: string
+          notes: string | null
+          proposed_stock: string | null
+          proposed_vehicle_json: Json | null
+          trade_vehicle_json: Json | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          customer_name: string
+          customer_phone?: string | null
+          deal_structure_json?: Json | null
+          id?: string
+          notes?: string | null
+          proposed_stock?: string | null
+          proposed_vehicle_json?: Json | null
+          trade_vehicle_json?: Json | null
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          customer_name?: string
+          customer_phone?: string | null
+          deal_structure_json?: Json | null
+          id?: string
+          notes?: string | null
+          proposed_stock?: string | null
+          proposed_vehicle_json?: Json | null
+          trade_vehicle_json?: Json | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_settings: {
+        Row: {
+          inventory_script_url: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          inventory_script_url?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          inventory_script_url?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
