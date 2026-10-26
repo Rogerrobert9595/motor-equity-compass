@@ -9,6 +9,11 @@ interface Props {
   onScrub?: (m: number) => void;
   /** A pinned deal to compare against, drawn as dashed lines. */
   pinned?: { series: SimPoint[]; breakeven: number | null } | null;
+  /** Warranty cliff line and sweet-spot trade window (loan months). */
+  milestones?: {
+    warranty?: { month: number; label: string } | null;
+    window?: { start: number; end: number } | null;
+  };
 }
 
 const W = 600;
@@ -18,7 +23,7 @@ const R = 12;
 const T = 12;
 const B = 26;
 
-export function EquityChart({ series, month, breakeven, onScrub, pinned }: Props) {
+export function EquityChart({ series, month, breakeven, onScrub, pinned, milestones }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const dragging = useRef(false);
   const ownTerm = Math.max(1, series.length - 1);
@@ -43,6 +48,9 @@ export function EquityChart({ series, month, breakeven, onScrub, pinned }: Props
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => (maxY / 1.06) * f);
   const years = Array.from({ length: Math.floor(term / 12) }, (_, i) => (i + 1) * 12);
   const pb = pinned?.breakeven;
+  const win = milestones?.window;
+  const wc = milestones?.warranty && milestones.warranty.month <= ownTerm ? milestones.warranty : null;
+  const wcRight = wc ? x(wc.month) > W - 110 : false;
 
   return (
     <svg
@@ -82,6 +90,23 @@ export function EquityChart({ series, month, breakeven, onScrub, pinned }: Props
           Y{m / 12}
         </text>
       ))}
+
+      {win && (
+        <g>
+          <rect x={x(win.start)} y={T} width={Math.max(2, x(win.end) - x(win.start))} height={H - T - B} className="fill-gain/10" />
+          <text x={(x(win.start) + x(win.end)) / 2} y={H - B - 6} textAnchor="middle" className="fill-gain text-[10px] font-semibold">
+            Trade window
+          </text>
+        </g>
+      )}
+      {wc && (
+        <g>
+          <line x1={x(wc.month)} x2={x(wc.month)} y1={T} y2={H - B} className="stroke-loss" strokeWidth={1.5} strokeDasharray="5 4" />
+          <text x={x(wc.month) + (wcRight ? -5 : 5)} y={T + 10} textAnchor={wcRight ? "end" : "start"} className="fill-loss text-[10px] font-semibold">
+            {wc.label}
+          </text>
+        </g>
+      )}
 
       {pinned && (
         <g className="text-muted-foreground">
