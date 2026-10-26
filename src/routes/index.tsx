@@ -7,6 +7,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  FolderOpen,
   Pin,
   PinOff,
   Send,
@@ -29,13 +30,16 @@ import { CurrentCarLookup } from "@/components/desk/CurrentCarLookup";
 import { EquityChart } from "@/components/desk/EquityChart";
 import { Field, money, num, NumInput, Panel, signedMoney, SliderField } from "@/components/desk/fields";
 import { InventoryPanel } from "@/components/desk/InventoryPanel";
+import { SavedDealsPanel } from "@/components/desk/SavedDealsPanel";
+import { useAuth } from "@/hooks/use-auth";
+import { getAccountScriptUrl, type SavedDeal, type TradeCar } from "@/lib/saved-deals";
 import { chartMilestones, MilestoneChips } from "@/components/desk/milestones";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { estimateMaint, makeFromModel, simulate, type CurrentInputs, type DealInputs, type SimPoint } from "@/lib/deal-math";
 import { findByStock, SAMPLE_INVENTORY, type Vehicle } from "@/lib/inventory";
-import { getSheetUrl } from "@/lib/sheet-config";
+import { getSheetUrl, saveSheetUrl } from "@/lib/sheet-config";
 import { encodeSummary } from "@/lib/summary-link";
 import { cn } from "@/lib/utils";
 import { decodeVin, fetchSheetInventory } from "@/lib/vehicle.functions";
@@ -85,6 +89,11 @@ function DeskPage() {
   const [scrub, setScrub] = useState(36);
   const [tab, setTab] = useState<Tab>("deal");
   const [panelOpen, setPanelOpen] = useState(false);
+  const [dealsOpen, setDealsOpen] = useState(false);
+  const [activeDeal, setActiveDeal] = useState<SavedDeal | null>(null);
+  const [tradeCar, setTradeCar] = useState<TradeCar | null>(null);
+  const [lookupKey, setLookupKey] = useState(0);
+  const { user } = useAuth();
   const [presenting, setPresenting] = useState(false);
   const [pinned, setPinned] = useState<{ term: number; cash: number; payment: number; breakeven: number | null; series: SimPoint[] } | null>(null);
   const [lookup, setLookup] = useState("");
@@ -146,31 +155,73 @@ function DeskPage() {
       /* ignore bad saved data */
     }
 
-    let cancelled = false;
+    void runSheetSync(getSheetUrl(), shown?.stock);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const syncReq = useRef(0);
+  const selectedStockRef = useRef(selected.stock);
+  selectedStockRef.current = selected.stock;
+  const runSheetSync = async (url: string, keepStock?: string) => {
+    const id = ++syncReq.current;
     setSheetStatus("syncing");
-    syncSheet({ data: { url: getSheetUrl() } })
-      .then((res) => {
-        if (cancelled) return;
-        if (res.error) {
-          setSheetStatus("error");
-          setSheetError(res.error);
-          return;
-        }
-        setSheetStatus("ok");
-        setSheetError(null);
-        const keep = shown && res.vehicles.find((v) => v.stock === shown!.stock);
-        replaceInventory(res.vehicles, `Sheet: ${res.tabName ?? "live"}`, keep ?? res.vehicles[0]);
+    try {
+      const res = await syncSheet({ data: { url } });
+      if (id !== syncReq.current) return;
+      if (res.error) {
+        setSheetStatus("error");
+        setSheetError(res.error);
+        return;
+      }
+      setSheetStatus("ok");
+      setSheetError(null);
+      const keep = keepStock && res.vehicles.find((v) => v.stock === keepStock);
+      replaceInventory(res.vehicles, `Sheet: ${res.tabName ?? "live"}`, keep || res.vehicles[0]);
+    } catch {
+      if (id !== syncReq.current) return;
+      setSheetStatus("error");
+      setSheetError("Couldn't reach the sheet. Showing the last saved units.");
+    }
+  };
+
+  // Signed in: use the sheet link saved to the account, so a new phone picks it up.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    getAccountScriptUrl()
+      .then((url) => {
+        if (cancelled || !url || url === getSheetUrl()) return;
+        saveSheetUrl(url);
+        void runSheetSync(url, selectedStockRef.current);
       })
       .catch(() => {
-        if (cancelled) return;
-        setSheetStatus("error");
-        setSheetError("Couldn't reach the sheet. Showing the last saved units.");
+        /* keep the device link */
       });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user?.id]);
+
+  const loadSavedDeal = (d: SavedDeal) => {
+    const live = d.proposedStock ? inventory.find((v) => v.stock === d.proposedStock) : undefined;
+    const v = d.vehicle ?? live;
+    if (v) applyVehicle(v, false);
+    if (d.deal) setDeal(d.deal);
+    if (d.current) setCurrent(d.current);
+    setTradeCar(d.tradeCar);
+    setLookupKey((k) => k + 1);
+    setActiveDeal(d);
+    toast.success(`Opened ${d.customerName}'s deal`);
+  };
+
+  const buildDraft = (meta: { customerName: string; customerPhone: string; notes: string }) => ({
+    ...meta,
+    vehicle: selected,
+    tradeCar,
+    deal,
+    current,
+  });
 
   const replaceInventory = (list: Vehicle[], src: string, pick: Vehicle | undefined = list[0]) => {
     setInventory(list);
@@ -297,6 +348,12 @@ function DeskPage() {
               <Send className="h-4 w-4" />
               <span className="hidden sm:inline">Share summary</span>
             </Button>
+            {!presenting && (
+              <Button variant="secondary" size="sm" className="h-10" onClick={() => setDealsOpen(true)} aria-label="Saved deals">
+                <FolderOpen className="h-4 w-4" />
+                <span className="hidden sm:inline">{activeDeal ? activeDeal.customerName : "Deals"}</span>
+              </Button>
+            )}
             {!presenting && (
               <Button variant="secondary" size="sm" className="h-10" onClick={() => setPanelOpen(true)}>
                 <Warehouse className="h-4 w-4" />
@@ -483,10 +540,18 @@ function DeskPage() {
             <div className="space-y-6">
               <CurrentCarLookup
                 milesPerYear={sim.annualMiles}
-                onEstimate={({ mpg, maint }) =>
-                  setCurrent((c) => ({ ...c, currMpg: mpg ?? c.currMpg, currMaint: maint }))
-                }
+                key={lookupKey}
+                onEstimate={({ mpg, maint, car }) => {
+                  setTradeCar(car);
+                  setCurrent((c) => ({ ...c, currMpg: mpg ?? c.currMpg, currMaint: maint }));
+                }}
               />
+              {activeDeal && tradeCar?.label && (
+                <p className="-mt-3 text-xs text-muted-foreground">
+                  Saved trade: <span className="text-foreground">{tradeCar.label}</span>
+                  {tradeCar.vin && <span className="num"> · VIN {tradeCar.vin}</span>}
+                </p>
+              )}
               <SliderField
                 label="Daily driving"
                 value={current.commute}
@@ -738,6 +803,14 @@ function DeskPage() {
         sheetError={sheetError}
         onSelect={(v) => applyVehicle(v)}
         onReplace={(list, src) => replaceInventory(list, src)}
+      />
+      <SavedDealsPanel
+        open={dealsOpen}
+        onOpenChange={setDealsOpen}
+        activeDeal={activeDeal}
+        buildDraft={buildDraft}
+        onLoad={loadSavedDeal}
+        onSaved={setActiveDeal}
       />
     </div>
   );
