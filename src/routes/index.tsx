@@ -162,6 +162,8 @@ function DeskPage() {
   const syncReq = useRef(0);
   const selectedStockRef = useRef(selected.stock);
   selectedStockRef.current = selected.stock;
+  const activeDealRef = useRef(activeDeal);
+  activeDealRef.current = activeDeal;
   const runSheetSync = async (url: string, keepStock?: string) => {
     const id = ++syncReq.current;
     setSheetStatus("syncing");
@@ -175,8 +177,10 @@ function DeskPage() {
       }
       setSheetStatus("ok");
       setSheetError(null);
-      const keep = keepStock && res.vehicles.find((v) => v.stock === keepStock);
-      replaceInventory(res.vehicles, `Sheet: ${res.tabName ?? "live"}`, keep || res.vehicles[0]);
+      const keep = keepStock ? res.vehicles.find((v) => v.stock === keepStock) : undefined;
+      // Don't overwrite an opened saved deal's numbers when the list refreshes underneath it.
+      const pick = keep && activeDealRef.current && keep.stock === selectedStockRef.current ? undefined : (keep ?? res.vehicles[0]);
+      replaceInventory(res.vehicles, `Sheet: ${res.tabName ?? "live"}`, pick);
     } catch {
       if (id !== syncReq.current) return;
       setSheetStatus("error");
