@@ -6,6 +6,11 @@ export interface BarRow {
   parts: { k: string; v: number; c: string }[];
 }
 
+/**
+ * Stacked monthly-outflow bars drawn to one dollar scale, so a cheaper deal is
+ * physically shorter. When the last row (the proposed car) is cheaper, the gap is
+ * filled with a dashed "back in pocket" ghost block.
+ */
 export function CompareBars({ rows }: { rows: BarRow[] }) {
   const totals = rows.map((r) => r.parts.reduce((s, p) => s + Math.max(0, p.v), 0));
   const max = Math.max(1, ...totals);
@@ -13,6 +18,10 @@ export function CompareBars({ rows }: { rows: BarRow[] }) {
     <div className="space-y-5">
       {rows.map((r, i) => {
         const total = totals[i] ?? 0;
+        const gap = max - total;
+        const ghost = i === rows.length - 1 && i > 0 && gap >= 1;
+        const ghostPct = (gap / max) * 100;
+        const wide = ghostPct >= 24;
         return (
           <div key={r.label}>
             <div className="mb-1.5 flex items-baseline justify-between">
@@ -22,13 +31,32 @@ export function CompareBars({ rows }: { rows: BarRow[] }) {
                 <span className="text-xs text-muted-foreground">/mo</span>
               </span>
             </div>
-            <div className="flex h-7 overflow-hidden rounded-lg bg-muted print:border print:border-border" style={{ width: `${(total / max) * 100}%` }}>
-              {r.parts.map((p) =>
-                p.v > 0 ? (
-                  <div key={p.k} className={cn(p.c, "h-full")} style={{ width: `${(p.v / (total || 1)) * 100}%` }} title={`${p.k} ${money(p.v)}`} />
-                ) : null,
+            <div className="flex h-8 w-full">
+              <div
+                className={cn("flex h-full overflow-hidden bg-muted print:border print:border-border", ghost ? "rounded-l-lg" : "rounded-lg")}
+                style={{ width: `${(total / max) * 100}%` }}
+              >
+                {r.parts.map((p) =>
+                  p.v > 0 ? (
+                    <div key={p.k} className={cn(p.c, "h-full")} style={{ width: `${(p.v / (total || 1)) * 100}%` }} title={`${p.k} ${money(p.v)}`} />
+                  ) : null,
+                )}
+              </div>
+              {ghost && (
+                <div
+                  className="flex h-full items-center justify-center overflow-hidden rounded-r-lg border-2 border-l-0 border-dashed border-gain/70 bg-gain/10"
+                  style={{ width: `${ghostPct}%` }}
+                  title={`${money(gap)}/mo back in pocket`}
+                >
+                  {wide && (
+                    <span className="num truncate px-1.5 text-[11px] font-semibold text-gain">{money(gap)}/mo back in pocket</span>
+                  )}
+                </div>
               )}
             </div>
+            {ghost && !wide && (
+              <div className="num mt-1 text-right text-xs font-semibold text-gain">↑ {money(gap)}/mo back in pocket</div>
+            )}
             <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
               {r.parts.map((p) => (
                 <span key={p.k} className="flex items-center gap-1">
