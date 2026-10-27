@@ -7,7 +7,8 @@ import {
   Copy,
   Eye,
   EyeOff,
-  FolderOpen,
+  LogIn,
+  LogOut,
   Pin,
   PinOff,
   Send,
@@ -22,6 +23,7 @@ import {
   Warehouse,
   Wrench,
   Wallet,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -31,18 +33,32 @@ import { EquityChart } from "@/components/desk/EquityChart";
 import { Field, money, num, NumInput, Panel, signedMoney, SliderField } from "@/components/desk/fields";
 import { InventoryPanel } from "@/components/desk/InventoryPanel";
 import { SavedDealsPanel } from "@/components/desk/SavedDealsPanel";
+import { SaveCustomerPopover } from "@/components/desk/SaveCustomerPopover";
+import { SpecBadge } from "@/components/desk/SpecBadge";
+import { AuthDialog } from "@/components/auth/AuthDialog";
 import { useAuth } from "@/hooks/use-auth";
+import { useSavedDeals } from "@/hooks/use-saved-deals";
 import { getAccountScriptUrl, type SavedDeal, type TradeCar } from "@/lib/saved-deals";
 import { chartMilestones, MilestoneChips } from "@/components/desk/milestones";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { estimateMaint, makeFromModel, simulate, type CurrentInputs, type DealInputs, type SimPoint } from "@/lib/deal-math";
+import {
+  annualDepreciationRate,
+  BASELINE_MILES,
+  estimateMaint,
+  makeFromModel,
+  SERVICE_PILLS,
+  simulate,
+  type CurrentInputs,
+  type DealInputs,
+  type SimPoint,
+} from "@/lib/deal-math";
 import { findByStock, SAMPLE_INVENTORY, type Vehicle } from "@/lib/inventory";
 import { getSheetUrl, saveSheetUrl } from "@/lib/sheet-config";
 import { encodeSummary } from "@/lib/summary-link";
 import { cn } from "@/lib/utils";
-import { decodeVin, fetchSheetInventory } from "@/lib/vehicle.functions";
+import { fetchSheetInventory, lookupVehicleSpecs } from "@/lib/vehicle.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -93,7 +109,13 @@ function DeskPage() {
   const [activeDeal, setActiveDeal] = useState<SavedDeal | null>(null);
   const [tradeCar, setTradeCar] = useState<TradeCar | null>(null);
   const [lookupKey, setLookupKey] = useState(0);
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
+  const savedDeals = useSavedDeals();
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authReason, setAuthReason] = useState<string | null>(null);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [pendingSave, setPendingSave] = useState(false);
+  const [specMpg, setSpecMpg] = useState<number | null>(null);
   const [presenting, setPresenting] = useState(false);
   const [pinned, setPinned] = useState<{ term: number; cash: number; payment: number; breakeven: number | null; series: SimPoint[] } | null>(null);
   const [lookup, setLookup] = useState("");
@@ -101,7 +123,7 @@ function DeskPage() {
   const [sheetStatus, setSheetStatus] = useState<"idle" | "syncing" | "ok" | "error">("idle");
   const [sheetError, setSheetError] = useState<string | null>(null);
   const vinReq = useRef(0);
-  const decode = useServerFn(decodeVin);
+  const specs = useServerFn(lookupVehicleSpecs);
   const syncSheet = useServerFn(fetchSheetInventory);
 
   const setD = <K extends keyof DealInputs>(k: K) => (v: DealInputs[K]) => setDeal((d) => ({ ...d, [k]: v }));
@@ -116,23 +138,31 @@ function DeskPage() {
       maint: v.estMaint ?? estimateMaint(makeFromModel(v.makeModel), v.miles),
     }));
     setVinStatus("idle");
-    if (lookupVin && v.vin.length >= 11) void lookupSpecs(v);
+    setSpecMpg(null);
+    if (lookupVin) void lookupSpecs(v);
   };
 
   const lookupSpecs = async (v: Vehicle) => {
     const id = ++vinReq.current;
     setVinStatus("loading");
     try {
-      const s = await decode({ data: { vin: v.vin, year: v.year, miles: v.miles } });
+      // VIN when the sheet has one, else year + make + model from the unit's name.
+      const hasVin = /^[A-HJ-NPR-Z0-9]{11,17}$/i.test(v.vin);
+      const [mk, ...rest] = v.makeModel.split(/\s+/);
+      const s = await specs({
+        data: hasVin ? { vin: v.vin, miles: v.miles } : { year: v.year, make: mk ?? null, model: rest.join(" ") || null, miles: v.miles },
+      });
       if (id !== vinReq.current) return;
       setVinStatus(s.source);
       if (s.source === "none") return;
+      const useLookup = s.source === "epa" || v.epaMpg == null;
+      if (useLookup && s.combMpg) setSpecMpg(s.combMpg);
       setSelected((cur) =>
         cur.stock === v.stock ? { ...cur, cityMpg: s.cityMpg, hwyMpg: s.hwyMpg, engine: s.engine ?? cur.engine ?? null } : cur,
       );
       setDeal((d) => ({
         ...d,
-        mpg: s.source === "epa" || v.epaMpg == null ? (s.combMpg ?? d.mpg) : d.mpg,
+        mpg: useLookup ? (s.combMpg ?? d.mpg) : d.mpg,
         maint: v.estMaint == null && s.estMaint ? s.estMaint : d.maint,
       }));
     } catch {
@@ -206,6 +236,40 @@ function DeskPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+
+  // Alt + C flips between Desk View and Customer View.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === "KeyC") {
+        e.preventDefault();
+        setPresenting((p) => !p);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Customer view hides everything internal, including the save/customer controls.
+  useEffect(() => {
+    if (!presenting) return;
+    setSaveOpen(false);
+    setDealsOpen(false);
+    setPanelOpen(false);
+  }, [presenting]);
+
+  // Tapped Save Customer while signed out → reopen the save form once signed in.
+  useEffect(() => {
+    if (user && pendingSave) {
+      setPendingSave(false);
+      setSaveOpen(true);
+    }
+  }, [user, pendingSave]);
+
+  const askSignIn = (reason: string | null, thenSave = false) => {
+    setAuthReason(reason);
+    setPendingSave(thenSave);
+    setAuthOpen(true);
+  };
 
   const loadSavedDeal = (d: SavedDeal) => {
     const live = d.proposedStock ? inventory.find((v) => v.stock === d.proposedStock) : undefined;
@@ -293,6 +357,8 @@ function DeskPage() {
     () => chartMilestones(selected.year, selected.miles, sim.annualMiles, sim.breakevenMonth, deal.term),
     [selected.year, selected.miles, sim.annualMiles, sim.breakevenMonth, deal.term],
   );
+  const depRatePct = Math.round(annualDepreciationRate(sim.annualMiles) * 1000) / 10;
+  const activePill = SERVICE_PILLS.find((p) => p.monthly === current.currMaint) ?? null;
   const moreDown = useMemo(() => simulate({ ...deal, cash: deal.cash + 1000 }, current, selected.miles), [deal, current, selected.miles]);
 
   const shareSummary = async () => {
@@ -322,7 +388,9 @@ function DeskPage() {
           <div className="flex items-center gap-3">
             <img src="/icons/icon-192.png" alt="" width={36} height={36} className="h-9 w-9 rounded-xl" />
             <div className="min-w-0 flex-1">
-              <h1 className="truncate text-base font-semibold leading-tight">Deal Desk</h1>
+              <h1 className="truncate text-base font-semibold leading-tight">
+                {activeDeal && !presenting ? activeDeal.customerName : "Deal Desk"}
+              </h1>
               <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
                 {sheetStatus === "syncing" && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
                 <span className="truncate">
@@ -338,31 +406,66 @@ function DeskPage() {
               </p>
             </div>
             <Button
-              variant="ghost"
-              size="icon"
-              className={cn("h-10 w-10", presenting && "bg-primary/15 text-primary")}
+              variant="outline"
+              size="sm"
+              className={cn("h-10 px-2.5", presenting && "border-gain/60 bg-gain/15 text-gain")}
               onClick={() => setPresenting((p) => !p)}
               aria-pressed={presenting}
-              aria-label={presenting ? "Show internal info" : "Customer view: hide internal info"}
-              title={presenting ? "Show internal info" : "Customer view"}
+              aria-label={presenting ? "Customer View on — switch to Desk View (Alt+C)" : "Desk View — switch to Customer View (Alt+C)"}
+              title={presenting ? "Switch to Desk View (Alt+C)" : "Switch to Customer View (Alt+C)"}
             >
               {presenting ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              <span className="hidden sm:inline">{presenting ? "Customer View" : "Desk View"}</span>
             </Button>
             <Button variant="secondary" size="sm" className="h-10" onClick={() => void shareSummary()} aria-label="Share summary">
               <Send className="h-4 w-4" />
-              <span className="hidden sm:inline">Share summary</span>
+              <span className="hidden xl:inline">Share summary</span>
             </Button>
             {!presenting && (
-              <Button variant="secondary" size="sm" className="h-10" onClick={() => setDealsOpen(true)} aria-label="Saved deals">
-                <FolderOpen className="h-4 w-4" />
-                <span className="hidden sm:inline">{activeDeal ? activeDeal.customerName : "Deals"}</span>
-              </Button>
-            )}
-            {!presenting && (
-              <Button variant="secondary" size="sm" className="h-10" onClick={() => setPanelOpen(true)}>
-                <Warehouse className="h-4 w-4" />
-                <span className="hidden sm:inline">Inventory</span>
-              </Button>
+              <>
+                <SaveCustomerPopover
+                  open={saveOpen}
+                  onOpenChange={setSaveOpen}
+                  activeDeal={activeDeal}
+                  buildDraft={buildDraft}
+                  onSaved={setActiveDeal}
+                  signedIn={!!user}
+                  onNeedSignIn={() => askSignIn("Sign in to save this customer and their deal to your account.", true)}
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="relative h-10"
+                  onClick={() => setDealsOpen(true)}
+                  aria-label={`My customers${savedDeals.data ? ` (${savedDeals.data.length})` : ""}`}
+                >
+                  <Users className="h-4 w-4" />
+                  <span className="hidden md:inline">My Customers</span>
+                  {user && savedDeals.data && (
+                    <span className="num absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground md:static md:h-5 md:px-1.5">
+                      {savedDeals.data.length}
+                    </span>
+                  )}
+                </Button>
+                <Button variant="secondary" size="sm" className="hidden h-10 lg:inline-flex" onClick={() => setPanelOpen(true)}>
+                  <Warehouse className="h-4 w-4" />
+                  <span className="hidden xl:inline">Inventory</span>
+                </Button>
+                {user ? (
+                  <div className="hidden items-center gap-1 border-l border-border pl-2 lg:flex">
+                    <span className="max-w-44 truncate text-xs text-muted-foreground" title={user.email ?? undefined}>
+                      {user.email}
+                    </span>
+                    <Button variant="ghost" size="sm" className="h-10" onClick={() => void signOut()}>
+                      <LogOut className="h-4 w-4" /> Sign Out
+                    </Button>
+                  </div>
+                ) : (
+                  <Button variant="ghost" size="sm" className="hidden h-10 lg:inline-flex" onClick={() => askSignIn(null)}>
+                    <LogIn className="h-4 w-4" /> Sign In
+                  </Button>
+                )}
+              </>
             )}
           </div>
 
@@ -425,7 +528,7 @@ function DeskPage() {
       </header>
 
       <main className="mx-auto grid max-w-7xl grid-cols-1 gap-4 px-4 pt-4 lg:grid-cols-12 lg:gap-6 lg:pt-6">
-        <div className="space-y-4 lg:col-span-5">
+        <div className={cn("space-y-4", presenting ? "lg:col-span-4" : "lg:col-span-5")}>
           {/* Proposed vehicle */}
           <section className={cn(show("deal"), "overflow-hidden rounded-2xl border border-border bg-card")}>
             <div className="bg-gradient-to-br from-primary/15 via-transparent to-transparent p-4 sm:p-5">
@@ -443,6 +546,11 @@ function DeskPage() {
                   label="Fuel economy"
                   value={`${deal.mpg} MPG`}
                   sub={selected.cityMpg && selected.hwyMpg ? `${selected.cityMpg} city / ${selected.hwyMpg} hwy` : undefined}
+                  badge={
+                    specMpg != null && deal.mpg === specMpg && (vinStatus === "epa" || vinStatus === "estimate") ? (
+                      <SpecBadge kind={vinStatus} />
+                    ) : undefined
+                  }
                 />
                 <Chip icon={<Wrench className="h-3.5 w-3.5" />} label="Maintenance" value={`${money(deal.maint)}/mo`} />
                 {!presenting && (
@@ -455,7 +563,7 @@ function DeskPage() {
                   icon={vinStatus === "loading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Car className="h-3.5 w-3.5" />}
                   label="Engine"
                   value={vinStatus === "loading" ? "Checking EPA…" : selected.engine || "—"}
-                  sub={vinStatus === "epa" ? "EPA verified" : vinStatus === "estimate" ? "Estimated from VIN" : undefined}
+                  sub={vinStatus === "epa" ? "Matched on fueleconomy.gov" : vinStatus === "estimate" ? "From VIN decode" : undefined}
                 />
               </div>
               {selected.vin && <div className="num mt-3 truncate text-xs text-muted-foreground">VIN {selected.vin}</div>}
@@ -516,6 +624,7 @@ function DeskPage() {
                 </Field>
                 <Field label="Unit MPG">
                   <NumInput label="Proposed MPG" value={deal.mpg} onChange={setD("mpg")} suffix="mpg" decimals={1} />
+                  {specMpg != null && deal.mpg === specMpg && (vinStatus === "epa" || vinStatus === "estimate") && <SpecBadge kind={vinStatus} />}
                 </Field>
                 <Field label="Unit maint.">
                   <NumInput label="Proposed maintenance per month" value={deal.maint} onChange={setD("maint")} prefix="$" suffix="/mo" decimals={0} />
@@ -565,7 +674,7 @@ function DeskPage() {
                 step={2}
                 suffix="mi/day"
                 decimals={0}
-                hint={`${num(sim.annualMiles)} miles a year`}
+                hint={`${num(sim.annualMiles)} miles a year · value drops ~${depRatePct}%/yr`}
               />
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Current payment">
@@ -574,9 +683,42 @@ function DeskPage() {
                 <Field label="Current MPG">
                   <NumInput label="Current MPG" value={current.currMpg} onChange={setC("currMpg")} suffix="mpg" decimals={1} />
                 </Field>
-                <Field label="Current repairs">
-                  <NumInput label="Current repairs per month" value={current.currMaint} onChange={setC("currMaint")} prefix="$" suffix="/mo" decimals={0} />
-                </Field>
+                <div className="col-span-2 space-y-2">
+                  <Field label="Current repairs">
+                    <NumInput label="Current repairs per month" value={current.currMaint} onChange={setC("currMaint")} prefix="$" suffix="/mo" decimals={0} />
+                  </Field>
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Upcoming service milestone</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SERVICE_PILLS.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        title={p.note}
+                        aria-pressed={activePill?.id === p.id}
+                        onClick={() => setC("currMaint")(p.monthly)}
+                        className={cn(
+                          "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                          activePill?.id === p.id ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background/60 text-muted-foreground active:bg-accent",
+                        )}
+                      >
+                        {p.label} <span className="num opacity-80">{money(p.monthly)}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {activePill && (
+                    <div role="note" className="rounded-lg border border-border bg-muted/60 p-2.5 text-xs">
+                      <div className="text-muted-foreground">{activePill.note}</div>
+                      <ul className="mt-1.5 space-y-0.5">
+                        {activePill.parts.map((x) => (
+                          <li key={x.k} className="flex justify-between gap-2">
+                            <span>{x.k}</span>
+                            <span className="num">{money(x.v)}/mo</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
                 <Field label="Gas price">
                   <NumInput label="Gas price per gallon" value={current.gasPrice} onChange={setC("gasPrice")} prefix="$" suffix="/gal" />
                 </Field>
@@ -588,7 +730,7 @@ function DeskPage() {
           </Panel>
         </div>
 
-        <div className="space-y-4 lg:col-span-7">
+        <div className={cn("space-y-4", presenting ? "lg:col-span-8" : "lg:col-span-7")}>
           {/* KPIs */}
           <div className={show("deal")}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -605,7 +747,7 @@ function DeskPage() {
               sub={`Gas ${sim.gasSave >= 0 ? "saves " : "+"}${money(Math.abs(sim.gasSave))} · Maint ${sim.maintSave >= 0 ? "saves " : "+"}${money(Math.abs(sim.maintSave))}`}
               tone={sim.opSavings >= 0 ? "gain" : "cost"}
             />
-            <FeelsLikeKpi feelsLike={sim.feelsLike} trueDelta={sim.trueDelta} />
+            <FeelsLikeKpi feelsLike={sim.feelsLike} trueDelta={sim.trueDelta} presenting={presenting} />
           </div>
           </div>
 
@@ -613,7 +755,7 @@ function DeskPage() {
           <Panel
             title="Total monthly outflow"
             kicker="Side by side"
-            className={show("costs")}
+            className={cn(show("costs"), presenting && "present-panel")}
             action={
               <Button variant="ghost" size="sm" className="h-9 text-primary" onClick={() => void shareSummary()}>
                 <Send className="h-4 w-4" /> Send
@@ -652,7 +794,7 @@ function DeskPage() {
           <Panel
             title="Equity crossover"
             kicker="Depreciation twin"
-            className={show("equity")}
+            className={cn(show("equity"), presenting && "present-panel")}
             action={
               <span className={cn("rounded-full px-2.5 py-1 text-xs font-semibold", sim.breakevenMonth != null ? "bg-gain/15 text-gain" : "bg-loss/15 text-loss")}>
                 {breakevenText}
@@ -663,6 +805,14 @@ function DeskPage() {
               <span className="flex items-center gap-1.5"><i className="h-2 w-4 rounded-full bg-gain" /> Est. trade value</span>
               <span className="flex items-center gap-1.5"><i className="h-2 w-4 rounded-full bg-cost" /> Loan payoff</span>
             </div>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Value drops about <strong className="num text-foreground">{depRatePct}%/yr</strong> at {num(sim.annualMiles)} mi/yr
+              {sim.annualMiles > BASELINE_MILES + 500
+                ? ` (faster: ${num(sim.annualMiles - BASELINE_MILES)} over the 12,000 baseline)`
+                : sim.annualMiles < BASELINE_MILES - 500
+                  ? ` (slower: ${num(BASELINE_MILES - sim.annualMiles)} under the 12,000 baseline)`
+                  : " (12,000 baseline)"}
+            </p>
             <div className="mb-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Compare terms</div>
@@ -812,10 +962,18 @@ function DeskPage() {
         open={dealsOpen}
         onOpenChange={setDealsOpen}
         activeDeal={activeDeal}
-        buildDraft={buildDraft}
         onLoad={loadSavedDeal}
-        onSaved={setActiveDeal}
+        onDeleted={(id) => activeDeal?.id === id && setActiveDeal(null)}
+        onNewCustomer={() => {
+          setActiveDeal(null);
+          toast("Next save creates a new customer");
+        }}
+        onSignIn={() => {
+          setDealsOpen(false);
+          askSignIn(null);
+        }}
       />
+      <AuthDialog open={authOpen} onOpenChange={setAuthOpen} reason={authReason} />
     </div>
   );
 }
@@ -836,13 +994,14 @@ function NavBtn({ active, onClick, icon, label }: { active: boolean; onClick: ()
   );
 }
 
-function Chip({ icon, label, value, sub }: { icon: ReactNode; label: string; value: string; sub?: string | undefined }) {
+function Chip({ icon, label, value, sub, badge }: { icon: ReactNode; label: string; value: string; sub?: string | undefined; badge?: ReactNode }) {
   return (
     <div className="rounded-xl border border-border bg-background/50 p-2.5">
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
         {icon}
         {label}
       </div>
+      {badge && <div className="mt-1">{badge}</div>}
       <div className="num mt-1 truncate text-sm font-semibold">{value}</div>
       {sub && <div className="truncate text-[11px] text-muted-foreground">{sub}</div>}
     </div>
@@ -862,10 +1021,10 @@ function Kpi({ icon, label, value, sub, tone, highlight }: { icon: ReactNode; la
   );
 }
 
-function FeelsLikeKpi({ feelsLike, trueDelta }: { feelsLike: number; trueDelta: number }) {
+function FeelsLikeKpi({ feelsLike, trueDelta, presenting }: { feelsLike: number; trueDelta: number; presenting?: boolean }) {
   const saves = trueDelta >= 0;
   return (
-    <div className="kpi-hero relative rounded-2xl p-4">
+    <div className={cn("kpi-hero relative rounded-2xl p-4", presenting && "ring-2 ring-gain/70 ring-offset-2 ring-offset-background")}>
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-gain/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-gain shadow-[0_0_14px_-2px_var(--gain)]">
           <LineChart className="h-3.5 w-3.5" />
