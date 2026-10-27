@@ -64,14 +64,25 @@ export function odometerAt(startMiles: number, milesPerYear: number, month: numb
   return Math.round(startMiles + (milesPerYear * month) / 12);
 }
 
+/** Baseline yearly miles the depreciation curve assumes. */
+export const BASELINE_MILES = 12000;
+
+/**
+ * Yearly value decay: 12% at 12,000 mi/yr, plus 1.2 points for every 1,000 mi/yr
+ * above that (minus 1.2 points per 1,000 below), kept between 5% and 35%.
+ */
+export function annualDepreciationRate(milesPerYear: number): number {
+  const rate = 0.12 + ((milesPerYear - BASELINE_MILES) / 1000) * 0.012;
+  return Math.min(0.35, Math.max(0.05, rate));
+}
+
 /**
  * Wholesale/trade value estimate: ~8% retail-to-trade gap at drive-off,
- * ~12%/yr curve depreciation, plus a penalty for miles over 12k/yr.
+ * then the mileage-aware yearly decay above. Never below 10% of price.
  */
 export function vehicleValue(price: number, month: number, milesPerYear: number): number {
-  const curve = price * 0.92 * Math.pow(0.88, month / 12);
-  const excessMiles = Math.max(0, milesPerYear - 12000) * (month / 12);
-  return Math.max(price * 0.1, curve - excessMiles * 0.06);
+  const curve = price * 0.92 * Math.pow(1 - annualDepreciationRate(milesPerYear), month / 12);
+  return Math.max(price * 0.1, curve);
 }
 
 export interface SimPoint {
@@ -211,6 +222,49 @@ export function serviceWindow(odometer: number) {
   const next = SERVICE_MILESTONES.find((m) => odometer < m.at) ?? null;
   return { passed, next };
 }
+
+/**
+ * Quick-select "upcoming service" brackets for the customer's current car.
+ * Monthly averages amortize the big-ticket items over ~2 years of ownership;
+ * `parts` add up to `monthly`.
+ */
+export const SERVICE_PILLS = [
+  {
+    id: "60k",
+    label: "60k Major Service",
+    monthly: 125,
+    note: "Includes amortized 60k major service, routine oil changes and brake/battery wear",
+    parts: [
+      { k: "60k service (plugs, trans & coolant fluid)", v: 60 },
+      { k: "Oil changes & filters", v: 35 },
+      { k: "Brake & battery wear", v: 30 },
+    ],
+  },
+  {
+    id: "75-90k",
+    label: "75k–90k Tires & Brakes",
+    monthly: 165,
+    note: "Includes amortized tires, brakes & scheduled fluid/belt service",
+    parts: [
+      { k: "Tires & alignment", v: 55 },
+      { k: "Brake pads & rotors", v: 45 },
+      { k: "Fluids, belts & hoses", v: 35 },
+      { k: "Oil changes & filters", v: 30 },
+    ],
+  },
+  {
+    id: "100k",
+    label: "100k+ Timing/Suspension",
+    monthly: 215,
+    note: "Includes amortized timing belt/water pump, shocks/struts, tires & brakes and fluid/belt service",
+    parts: [
+      { k: "Timing belt & water pump", v: 70 },
+      { k: "Shocks, struts & suspension", v: 65 },
+      { k: "Tires & brakes", v: 45 },
+      { k: "Fluids, belts & oil", v: 35 },
+    ],
+  },
+] as const;
 
 /** Factory coverage most brands use: bumper-to-bumper 3 yr/36k, powertrain 5 yr/60k. */
 export const WARRANTY = {
