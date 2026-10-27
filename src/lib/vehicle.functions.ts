@@ -102,72 +102,112 @@ export const getEpaVehicle = createServerFn({ method: "POST" })
     }
   });
 
-export const decodeVin = createServerFn({ method: "POST" })
-  .inputValidator((data) =>
-    z
-      .object({ vin: z.string().regex(/^[A-HJ-NPR-Z0-9]{11,17}$/i), year: z.number().int(), miles: z.number() })
-      .parse(data),
-  )
-  .handler(async ({ data }): Promise<VinSpecs> => {
-    const empty: VinSpecs = { year: null, make: null, model: null, engine: null, combMpg: null, cityMpg: null, hwyMpg: null, estMaint: null, source: "none" };
-    let v: any;
+const VIN_RE = /^[A-HJ-NPR-Z0-9]{11,17}$/i;
+
+/**
+ * Exact EPA MPG for a car, by VIN and/or year + make + model.
+ * A. NHTSA vPIC decodes the VIN (year, make, model, drive, engine, fuel).
+ * B. fueleconomy.gov options for year/make/model (falls back to the closest EPA model name, e.g. "RAV4 AWD").
+ * C. First matching option (preferring the same cylinders/displacement) → certified comb08/city08/highway08.
+ * D. No exact match → engine-displacement estimate, flagged as "estimate".
+ */
+export async function fetchExactEpaMpg(
+  year: number | null,
+  make: string | null,
+  model: string | null,
+  vin?: string | null,
+): Promise<Omit<VinSpecs, "estMaint">> {
+  let drive = "";
+  let displ: number | null = null;
+  let cyl: number | null = null;
+  let fuel = "Gasoline";
+
+  if (vin && VIN_RE.test(vin)) {
     try {
-      const nhtsa = await getJson(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${data.vin}?format=json`);
-      v = nhtsa?.Results?.[0];
+      const nhtsa = await getJson(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${vin}?format=json`);
+      const v = nhtsa?.Results?.[0];
+      if (v?.Make) {
+        make = v.Make;
+        model = v.Model || model;
+        year = parseInt(v.ModelYear) || year;
+        drive = v.DriveType || "";
+        displ = parseFloat(v.DisplacementL) || null;
+        cyl = parseInt(v.EngineCylinders) || null;
+        fuel = v.FuelTypePrimary || fuel;
+      }
     } catch (err) {
       console.error("NHTSA decode failed", err);
-      return empty;
     }
-    if (!v?.Make) return empty;
+  }
 
-    const make: string = v.Make;
-    const model: string = v.Model || "";
-    const year = parseInt(v.ModelYear) || data.year;
-    const displ = parseFloat(v.DisplacementL) || 2.5;
-    const cyl = parseInt(v.EngineCylinders) || 4;
-    const drive: string = v.DriveType || "";
-    const fuel: string = v.FuelTypePrimary || "Gasoline";
-    const engine = `${Number(displ.toFixed(1))}L ${cyl}-Cyl ${fuel === "Gasoline" ? "Gas" : fuel}`;
-    const estMaint = estimateMaint(make, data.miles);
+  if (!make || !year) {
+    return { year: null, make: null, model: null, engine: null, combMpg: null, cityMpg: null, hwyMpg: null, source: "none" };
+  }
+  const engine = displ || cyl ? `${displ ? `${Number(displ.toFixed(1))}L ` : ""}${cyl ? `${cyl}-Cyl ` : ""}${fuel === "Gasoline" ? "Gas" : fuel}` : null;
 
+  if (model) {
     try {
-      const base = "https://www.fueleconomy.gov/ws/rest/vehicle/menu";
-      const models = asList((await getJson(`${base}/model?year=${year}&make=${encodeURIComponent(make)}`))?.menuItem);
-      const m = model.toLowerCase();
-      const awd = /AWD|4WD|4x4/i.test(drive);
-      const candidates = models.filter((x: any) => String(x.value).toLowerCase().startsWith(m));
-      const pick =
-        candidates.find((x: any) => (awd ? /AWD|4WD/i.test(x.value) : /FWD|2WD|RWD/i.test(x.value))) ??
-        candidates[0];
-      if (pick) {
-        const opts = asList(
-          (await getJson(`${base}/options?year=${year}&make=${encodeURIComponent(make)}&model=${encodeURIComponent(pick.value)}`))
-            ?.menuItem,
+      const optionsFor = async (md: string) =>
+        asList(
+          (await getJson(`${EPA_MENU}/options?year=${year}&make=${encodeURIComponent(make!)}&model=${encodeURIComponent(md)}`))?.menuItem,
         );
-        if (opts[0]?.value) {
-          const veh = await getJson(`https://www.fueleconomy.gov/ws/rest/vehicle/${opts[0].value}`);
-          const comb = parseInt(veh.comb08);
-          if (comb > 0) {
-            return {
-              year,
-              make,
-              model,
-              engine,
-              combMpg: comb,
-              cityMpg: parseInt(veh.city08) || comb - 2,
-              hwyMpg: parseInt(veh.highway08) || comb + 3,
-              estMaint,
-              source: "epa",
-            };
-          }
+      let opts = await optionsFor(model);
+      if (!opts.length) {
+        // EPA model names carry drive/body suffixes; pick the closest one.
+        const models = asList((await getJson(`${EPA_MENU}/model?year=${year}&make=${encodeURIComponent(make)}`))?.menuItem);
+        const m = model.toLowerCase();
+        const awd = /AWD|4WD|4x4/i.test(drive);
+        const candidates = models.filter((x: any) => String(x.value).toLowerCase().startsWith(m));
+        const pick =
+          candidates.find((x: any) => (awd ? /AWD|4WD/i.test(x.value) : /FWD|2WD|RWD/i.test(x.value))) ?? candidates[0];
+        if (pick) opts = await optionsFor(String(pick.value));
+      }
+      const match =
+        opts.find((o: any) => {
+          const t = String(o.text);
+          return (!cyl || t.includes(`${cyl} cyl`)) && (!displ || t.includes(`${Number(displ.toFixed(1))} L`));
+        }) ?? opts[0];
+      if (match?.value) {
+        const veh = await getJson(`https://www.fueleconomy.gov/ws/rest/vehicle/${match.value}`);
+        const comb = parseInt(veh?.comb08);
+        if (comb > 0) {
+          return {
+            year,
+            make,
+            model,
+            engine,
+            combMpg: comb,
+            cityMpg: parseInt(veh.city08) || null,
+            hwyMpg: parseInt(veh.highway08) || null,
+            source: "epa",
+          };
         }
       }
     } catch (err) {
       console.error("EPA lookup failed", err);
     }
+  }
 
-    const est = estimateMpg(cyl, displ, drive);
-    return { year, make, model, engine, combMpg: est, cityMpg: est - 2, hwyMpg: est + 3, estMaint, source: "estimate" };
+  const est = estimateMpg(cyl ?? 4, displ ?? 2.5, drive);
+  return { year, make, model, engine, combMpg: est, cityMpg: est - 2, hwyMpg: est + 3, source: "estimate" };
+}
+
+/** Specs for the proposed unit or the customer's car: VIN when there is one, else year/make/model. */
+export const lookupVehicleSpecs = createServerFn({ method: "POST" })
+  .inputValidator((data) =>
+    z
+      .object({
+        vin: z.string().regex(VIN_RE).nullable().optional(),
+        year: z.number().int().min(0).max(2100).nullable().optional(),
+        make: z.string().max(60).nullable().optional(),
+        model: z.string().max(120).nullable().optional(),
+        miles: z.number(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data }): Promise<VinSpecs> => {
+    const s = await fetchExactEpaMpg(data.year || null, data.make ?? null, data.model ?? null, data.vin ?? null);
+    return { ...s, estMaint: s.make ? estimateMaint(s.make, data.miles) : null };
   });
 
 export interface SafetyRecords {
