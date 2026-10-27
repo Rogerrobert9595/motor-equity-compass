@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { assumedMiles, estimateMaint, MILEAGE_BUCKETS } from "@/lib/deal-math";
 import { cn } from "@/lib/utils";
-import { decodeVin, getEpaMenu, getEpaVehicle } from "@/lib/vehicle.functions";
+import { getEpaMenu, getEpaVehicle, lookupVehicleSpecs } from "@/lib/vehicle.functions";
 
 import { CarSources } from "./CarSources";
+import { SpecBadge } from "./SpecBadge";
 
 type Item = { text: string; value: string };
 type Mode = "vin" | "pick";
@@ -20,6 +21,8 @@ interface Found {
   vin: string | null;
   label: string;
   mpg: number | null;
+  cityMpg: number | null;
+  hwyMpg: number | null;
   mpgSource: "epa" | "estimate" | null;
 }
 
@@ -33,15 +36,6 @@ interface Props {
   /** Customer's yearly driving, for the AAA per-mile benchmark. */
   milesPerYear: number;
 }
-
-// Change any default fallback estimates like:
-mpg: 25, 
-monthlyRepairs: 120,
-
-// Directly to:
-mpg: 0,
-monthlyRepairs: 0,
-currentPayment: 0,
 
 const THIS_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: THIS_YEAR + 1 - 1990 + 1 }, (_, i) => THIS_YEAR + 1 - i);
@@ -104,7 +98,7 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
 
   const menu = useServerFn(getEpaMenu);
   const vehicle = useServerFn(getEpaVehicle);
-  const decode = useServerFn(decodeVin);
+  const specs = useServerFn(lookupVehicleSpecs);
 
   const miles = useMemo(() => {
     const bucket = MILEAGE_BUCKETS[Number(mileage)];
@@ -137,7 +131,11 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
     if (res.error) setError(res.error);
     if (level === "make") setMakes(res.items);
     if (level === "model") setModels(res.items);
-    if (level === "options") setTrims(res.items);
+    if (level === "options") {
+      setTrims(res.items);
+      // Take the first EPA match right away; the salesperson can pick another trim.
+      if (res.items[0]) void pickTrim(res.items[0].value, res.items, y, mk, md);
+    }
   };
 
   const pickYear = (y: string) => {
@@ -167,27 +165,29 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
     if (md) {
       void loadList("options", year, make, md);
       // Repairs can be estimated as soon as the model is known; MPG fills in with the trim.
-      setFound({ year: Number(year), make, model: md, vin: null, label: `${year} ${make} ${md}`, mpg: null, mpgSource: null });
+      setFound({ year: Number(year), make, model: md, vin: null, label: `${year} ${make} ${md}`, mpg: null, cityMpg: null, hwyMpg: null, mpgSource: null });
     }
   };
 
-  const pickTrim = async (t: string) => {
+  const pickTrim = async (t: string, list = trims, y = year, mk = make, md = model) => {
     setTrim(t);
     if (!t) return;
-    const trimText = trims.find((x) => x.value === t)?.text ?? "";
+    const trimText = list.find((x) => x.value === t)?.text ?? "";
     const id = ++req.current;
     setLoading("mpg");
-    const res = await vehicle({ data: { id: t } }).catch(() => ({ combMpg: null }));
+    const res = await vehicle({ data: { id: t } }).catch(() => ({ combMpg: null, cityMpg: null, hwyMpg: null }));
     if (id !== req.current) return;
     setLoading(null);
     if (!res.combMpg) setError("No EPA MPG for that trim. Enter MPG by hand.");
     setFound({
-      year: Number(year),
-      make,
-      model,
+      year: Number(y),
+      make: mk,
+      model: md,
       vin: null,
-      label: `${year} ${make} ${model} · ${trimText}`,
+      label: `${y} ${mk} ${md} · ${trimText}`,
       mpg: res.combMpg ?? null,
+      cityMpg: res.cityMpg ?? null,
+      hwyMpg: res.hwyMpg ?? null,
       mpgSource: res.combMpg ? "epa" : null,
     });
   };
@@ -201,7 +201,7 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
     const id = ++req.current;
     setLoading("vin");
     setError(null);
-    const s = await decode({ data: { vin: v, year: 0, miles: miles?.miles ?? 0 } }).catch(() => null);
+    const s = await specs({ data: { vin: v, miles: miles?.miles ?? 0 } }).catch(() => null);
     if (id !== req.current) return;
     setLoading(null);
     if (!s || s.source === "none" || !s.make) {
@@ -215,6 +215,8 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
       vin: v,
       label: [s.year || "", s.make, s.model, s.engine ? `· ${s.engine}` : ""].filter(Boolean).join(" "),
       mpg: s.combMpg,
+      cityMpg: s.cityMpg,
+      hwyMpg: s.hwyMpg,
       mpgSource: s.source === "epa" ? "epa" : "estimate",
     });
   };
@@ -322,9 +324,14 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
         <div className="flex items-start gap-2 rounded-lg bg-primary/10 p-2.5 text-xs">
           <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
           <div className="min-w-0">
-            <div className="truncate font-medium text-foreground">{found.label}</div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="truncate font-medium text-foreground">{found.label}</span>
+              {found.mpg != null && found.mpgSource && <SpecBadge kind={found.mpgSource} />}
+            </div>
             <div className="text-muted-foreground">
-              {found.mpg ? `${found.mpg} mpg ${found.mpgSource === "epa" ? "(EPA)" : "(estimate)"}` : "MPG: pick a trim"}
+              {found.mpg
+                ? `${found.mpg} mpg combined${found.cityMpg && found.hwyMpg ? ` (${found.cityMpg} city / ${found.hwyMpg} hwy)` : ""}`
+                : "MPG: pick a trim"}
               {miles && ` · repairs est. at ${miles.miles.toLocaleString("en-US")} mi${miles.assumed ? " (assumed from age)" : ""}`}
               {" · applied below"}
             </div>

@@ -191,3 +191,39 @@ describe("trade window", () => {
     expect(tradeWindow(null, 30, 72)).toBeNull();
   });
 });
+
+describe("mileage-aware depreciation", () => {
+  it("uses 12%/yr at the 12,000 mi/yr baseline", async () => {
+    const { annualDepreciationRate, vehicleValue } = await import("./deal-math");
+    expect(annualDepreciationRate(12000)).toBeCloseTo(0.12, 10);
+    expect(vehicleValue(20000, 12, 12000)).toBeCloseTo(20000 * 0.92 * 0.88, 5);
+  });
+
+  it("adds 1.2 points per 1,000 extra miles and removes 1.2 per 1,000 fewer", async () => {
+    const { annualDepreciationRate } = await import("./deal-math");
+    expect(annualDepreciationRate(15000)).toBeCloseTo(0.156, 10);
+    expect(annualDepreciationRate(9000)).toBeCloseTo(0.084, 10);
+  });
+
+  it("keeps the yearly rate between 5% and 35%", async () => {
+    const { annualDepreciationRate } = await import("./deal-math");
+    expect(annualDepreciationRate(1000)).toBe(0.05);
+    expect(annualDepreciationRate(60000)).toBe(0.35);
+  });
+
+  it("pushes the equity crossover later for a heavier driver", () => {
+    const deal = { price: 30000, cash: 0, tradeValue: 0, tradePayoff: 0, taxRate: 8, tradeTaxCredit: true, fees: 375, apr: 6.9, term: 72, mpg: 27, maint: 58 };
+    const cur = { commute: 20, currPay: 310, currMpg: 18, currMaint: 165, gasPrice: 3.45, insDelta: 18 };
+    const light = simulate(deal, cur, 10000).breakevenMonth!;
+    const heavy = simulate(deal, { ...cur, commute: 90 }, 10000).breakevenMonth!;
+    expect(heavy).toBeGreaterThan(light);
+  });
+});
+
+describe("service milestone pills", () => {
+  it("sets $125, $165 and $215 a month, each backed by parts that add up", async () => {
+    const { SERVICE_PILLS } = await import("./deal-math");
+    expect(SERVICE_PILLS.map((p) => p.monthly)).toEqual([125, 165, 215]);
+    for (const p of SERVICE_PILLS) expect(p.parts.reduce((s, x) => s + x.v, 0)).toBe(p.monthly);
+  });
+});

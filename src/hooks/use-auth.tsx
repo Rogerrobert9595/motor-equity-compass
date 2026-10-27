@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { User } from "@supabase/supabase-js";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -15,6 +16,7 @@ const AuthContext = createContext<AuthState>({ user: null, ready: false, signOut
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
@@ -30,6 +32,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    await queryClient.cancelQueries();
+    queryClient.removeQueries({ queryKey: ["saved_deals"] });
     await supabase.auth.signOut();
   };
 
