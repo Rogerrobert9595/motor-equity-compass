@@ -174,3 +174,15 @@
     linear-gradient(135deg, var(--gain), color-mix(in oklch, var(--gain) 25%, transparent) 55%, var(--gain)) border-box;
   box-shadow: 0 0 28px -6px color-mix(in oklch, var(--gain) 45%, transparent);
 }
+
+/* Customer View: bigger, emerald-edged outflow + equity panels for tablets/monitors. */
+@utility present-panel {
+  border-color: color-mix(in oklch, var(--gain) 45%, var(--border));
+  box-shadow: 0 0 26px -10px color-mix(in oklch, var(--gain) 55%, transparent);
+  & h2 {
+    font-size: 1.375rem;
+  }
+  @media (min-width: 64rem) {
+    padding: 1.75rem;
+  }
+}
