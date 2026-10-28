@@ -41,7 +41,7 @@ const toNum = (v: unknown) => {
 };
 const toText = (v: unknown) => {
   const t = String(v ?? "").trim();
-  return t ? t : null;
+  return t ? t.slice(0, 80) : null;
 };
 const isYear = (v: unknown) => {
   const n = toInt(v);
