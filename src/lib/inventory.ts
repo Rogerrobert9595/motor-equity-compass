@@ -1,5 +1,9 @@
 // Inventory types, sample units, and parsers for pasted sheet rows / sheet JSON.
 
+/** 11–17 character VIN (letters I, O and Q are never used). Shared by every VIN check. */
+export const VIN_RE = /^[A-HJ-NPR-Z0-9]{11,17}$/i;
+export const isVin = (v: string | null | undefined): v is string => !!v && VIN_RE.test(v.trim());
+
 export interface Vehicle {
   stock: string;
   loc: string;
@@ -35,6 +39,10 @@ const toNum = (v: unknown) => {
   const n = parseFloat(String(v ?? "").replace(/[$,\s]/g, ""));
   return Number.isFinite(n) && n > 0 ? n : null;
 };
+const toText = (v: unknown) => {
+  const t = String(v ?? "").trim();
+  return t ? t : null;
+};
 const isYear = (v: unknown) => {
   const n = toInt(v);
   return /^\s*\d{4}\s*$/.test(String(v ?? "")) && n >= 1980 && n <= 2035;
@@ -43,7 +51,7 @@ const isYear = (v: unknown) => {
 /**
  * Parse rows copied from the inventory sheet (tab separated).
  * Finds the year column on each row so it works whether the copy starts at column A, B or C.
- * Layout from the stock column: Stock, Year, Model, Desc, Miles, Price, Days, Status, VIN, (skip), MPG, Maint.
+ * Layout from the stock column: Stock, Year, Model, Desc, Miles, Price, Days, Status, VIN, (skip), MPG, Maint, Engine spec.
  */
 export function parsePastedRows(text: string): Vehicle[] {
   const out: Vehicle[] = [];
@@ -71,6 +79,7 @@ export function parsePastedRows(text: string): Vehicle[] {
       vin: clean[s + 8] ?? "",
       epaMpg: toNum(clean[s + 10]),
       estMaint: toNum(clean[s + 11]),
+      engine: toText(clean[s + 12]),
     });
   }
   return out;
@@ -91,6 +100,8 @@ interface RawUnit {
   vin?: unknown;
   epaMpg?: unknown;
   estMaint?: unknown;
+  engineSpec?: unknown; // column O "VIN Engine Spec", e.g. "1.3L 3-Cyl (Gasoline)"
+  engine?: unknown;
 }
 
 export function normalizeSheetJson(json: unknown): Vehicle[] {
@@ -111,6 +122,7 @@ export function normalizeSheetJson(json: unknown): Vehicle[] {
       vin: String(u.vin ?? "").trim(),
       epaMpg: toNum(u.epaMpg),
       estMaint: toNum(u.estMaint),
+      engine: toText(u.engineSpec ?? u.engine),
     }))
     .filter((v) => v.stock && v.makeModel && !Number.isNaN(v.year));
 }
