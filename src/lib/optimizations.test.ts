@@ -35,11 +35,11 @@ describe("quickDeal (term cards / $1,000 more down)", () => {
     expect(quick.breakevenMonth).toBe(full.breakevenMonth);
   });
 
-  it("reports null when the customer stays upside down", () => {
+  it("agrees on a late crossover when negative equity is rolled in", () => {
     const upside = { ...deal, cash: 0, tradeValue: 0, tradePayoff: 8000, apr: 18.9, term: 84 };
     const full = simulate(upside, { ...current, commute: 110 }, 0);
-    expect(full.breakevenMonth).toBeNull();
-    expect(quickDeal(upside, full.annualMiles).breakevenMonth).toBeNull();
+    expect(full.breakevenMonth).toBeGreaterThan(60);
+    expect(quickDeal(upside, full.annualMiles).breakevenMonth).toBe(full.breakevenMonth);
   });
 });
 
