@@ -47,6 +47,8 @@ export function useInventory({ userId, onPick, getSelection }: Options) {
   pickRef.current = onPick;
   const selectionRef = useRef(getSelection);
   selectionRef.current = getSelection;
+  const fetchRef = useRef(fetchSheet);
+  fetchRef.current = fetchSheet;
   const syncReq = useRef(0);
 
   const replace = useCallback((list: Vehicle[], src: string, pick: Vehicle | null = list[0] ?? null) => {
@@ -63,7 +65,7 @@ export function useInventory({ userId, onPick, getSelection }: Options) {
       const id = ++syncReq.current;
       setSheet((s) => ({ ...s, status: "syncing" }));
       try {
-        const res = await fetchSheet({ data: { url } });
+        const res = await fetchRef.current({ data: { url } });
         if (id !== syncReq.current) return;
         if (res.error) {
           setSheet({ status: "error", error: res.error });
@@ -79,7 +81,7 @@ export function useInventory({ userId, onPick, getSelection }: Options) {
         setSheet({ status: "error", error: "Couldn't reach the sheet. Showing the last saved units." });
       }
     },
-    [fetchSheet, replace],
+    [replace],
   );
 
   // Show the last saved inventory instantly, then refresh from the shared sheet.
