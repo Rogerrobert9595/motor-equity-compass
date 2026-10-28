@@ -32,7 +32,8 @@ interface Props {
 export function InventoryPanel({ open, onOpenChange, inventory, source, selectedStock, sheetError, onSelect, onReplace }: Props) {
   const isMobile = useIsMobile();
   const [filter, setFilter] = useState("");
-  const [url, setUrl] = useState(DEFAULT_SCRIPT_URL);
+  // Saved link on this device, else the built-in default (getSheetUrl reads localStorage "deal_desk_script_url").
+  const [url, setUrl] = useState(() => getSheetUrl());
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
@@ -40,9 +41,10 @@ export function InventoryPanel({ open, onOpenChange, inventory, source, selected
   const sync = useServerFn(fetchSheetInventory);
   const { user } = useAuth();
 
+  // Re-read when the panel opens: an account sign-in may have swapped the saved link.
   useEffect(() => {
-    setUrl(getSheetUrl());
-  }, []);
+    if (open) setUrl(getSheetUrl());
+  }, [open]);
 
   useEffect(() => {
     setSyncError(sheetError);
