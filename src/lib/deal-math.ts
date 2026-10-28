@@ -143,6 +143,25 @@ export function simulate(deal: DealInputs, current: CurrentInputs, startMiles: n
 
 export type Simulation = ReturnType<typeof simulate>;
 
+/**
+ * Just the payment and first positive-equity month for a deal — same numbers as
+ * `simulate`, without building the month-by-month series. Used for the term
+ * comparison cards and the "$1,000 more down" hint, which run on every drag.
+ */
+export function quickDeal(
+  deal: Pick<DealInputs, "price" | "cash" | "tradeValue" | "tradePayoff" | "taxRate" | "tradeTaxCredit" | "fees" | "apr" | "term">,
+  milesPerYear: number,
+): { payment: number; breakevenMonth: number | null } {
+  const financed = dealTax(deal).financed;
+  const payment = monthlyPayment(financed, deal.apr, deal.term);
+  for (let m = 0; m <= deal.term; m++) {
+    if (vehicleValue(deal.price, m, milesPerYear) - loanBalance(financed, deal.apr, deal.term, m) >= 0) {
+      return { payment, breakevenMonth: m };
+    }
+  }
+  return { payment, breakevenMonth: null };
+}
+
 /** Ported from the Apps Script fetchPublicSpecsByVin fallback estimator. */
 const BRAND_ANNUAL_MAINT: Record<string, number> = {
   TOYOTA: 490,
