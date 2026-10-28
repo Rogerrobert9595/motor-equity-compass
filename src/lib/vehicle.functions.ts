@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { estimateMaint, estimateMpg } from "./deal-math";
-import { normalizeSheetJson, type Vehicle } from "./inventory";
+import { normalizeSheetJson, VIN_RE, type Vehicle } from "./inventory";
 
 const ALLOWED_SHEET_HOSTS = ["script.google.com", "script.googleusercontent.com"];
 
@@ -101,8 +101,6 @@ export const getEpaVehicle = createServerFn({ method: "POST" })
       return { combMpg: null, cityMpg: null, hwyMpg: null };
     }
   });
-
-const VIN_RE = /^[A-HJ-NPR-Z0-9]{11,17}$/i;
 
 /**
  * Exact EPA MPG for a car, by VIN and/or year + make + model.

@@ -37,8 +37,9 @@ import { SaveCustomerPopover } from "@/components/desk/SaveCustomerPopover";
 import { SpecBadge } from "@/components/desk/SpecBadge";
 import { AuthDialog } from "@/components/auth/AuthDialog";
 import { useAuth } from "@/hooks/use-auth";
+import { useInventory } from "@/hooks/use-inventory";
 import { useSavedDeals } from "@/hooks/use-saved-deals";
-import { getAccountScriptUrl, type SavedDeal, type TradeCar } from "@/lib/saved-deals";
+import { type SavedDeal, type TradeCar } from "@/lib/saved-deals";
 import { chartMilestones, MilestoneChips } from "@/components/desk/milestones";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -48,17 +49,18 @@ import {
   BASELINE_MILES,
   estimateMaint,
   makeFromModel,
+  quickDeal,
   SERVICE_PILLS,
   simulate,
   type CurrentInputs,
   type DealInputs,
   type SimPoint,
 } from "@/lib/deal-math";
-import { findByStock, SAMPLE_INVENTORY, type Vehicle } from "@/lib/inventory";
-import { getSheetUrl, saveSheetUrl } from "@/lib/sheet-config";
+import { findByStock, isVin, SAMPLE_INVENTORY, type Vehicle } from "@/lib/inventory";
+import { vehicleLookupCache } from "@/lib/lookup-cache";
 import { encodeSummary } from "@/lib/summary-link";
 import { cn } from "@/lib/utils";
-import { fetchSheetInventory, lookupVehicleSpecs } from "@/lib/vehicle.functions";
+import { lookupVehicleSpecs } from "@/lib/vehicle.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -82,52 +84,108 @@ export const Route = createFileRoute("/")({
 });
 
 type Tab = "deal" | "costs" | "equity";
+type Overlay = "inventory" | "deals" | "save" | null;
 const TERMS = [48, 60, 72, 84];
 
+const DEFAULT_DEAL: DealInputs = {
+  price: 23999,
+  cash: 2500,
+  tradeValue: 0,
+  tradePayoff: 0,
+  taxRate: 8,
+  tradeTaxCredit: true,
+  fees: 375,
+  apr: 6.9,
+  term: 72,
+  mpg: 27,
+  maint: 58,
+};
+const DEFAULT_CURRENT: CurrentInputs = { commute: 42, currPay: 310, currMpg: 18, currMaint: 165, gasPrice: 3.45, insDelta: 18 };
+
+/** Proposed-unit EPA / VIN lookup state. `mpg` is the looked-up MPG (badge shows while the field still matches it). */
+interface SpecState {
+  status: "idle" | "loading" | "epa" | "estimate" | "none";
+  mpg: number | null;
+  engineFrom: "sheet" | "lookup" | null;
+}
+const IDLE_SPEC: SpecState = { status: "idle", mpg: null, engineFrom: null };
+
+/** Sign-in dialog: why it opened, and whether to reopen Save Customer afterwards. */
+interface AuthPrompt {
+  open: boolean;
+  reason: string | null;
+  thenSave: boolean;
+}
+
+type SpecsFn = ReturnType<typeof useServerFn<typeof lookupVehicleSpecs>>;
+
+/** EPA/VIN specs for a stock unit, cached for the session so revisiting a unit is instant. */
+function unitSpecs(fetchSpecs: SpecsFn, v: Vehicle) {
+  // VIN when the sheet has one, else year + make + model from the unit's name.
+  const [mk, ...rest] = v.makeModel.split(/\s+/);
+  const data = isVin(v.vin)
+    ? { vin: v.vin.trim(), miles: v.miles }
+    : { year: v.year, make: mk ?? null, model: rest.join(" ") || null, miles: v.miles };
+  return vehicleLookupCache.get(`specs:${JSON.stringify(data)}`, () => fetchSpecs({ data }), (s) => s.source !== "none");
+}
+
 function DeskPage() {
-  const [inventory, setInventory] = useState<Vehicle[]>(SAMPLE_INVENTORY);
-  const [source, setSource] = useState("Sample units");
   const [selected, setSelected] = useState<Vehicle>(SAMPLE_INVENTORY[0]!);
-  const [deal, setDeal] = useState<DealInputs>({
-    price: 23999,
-    cash: 2500,
-    tradeValue: 0,
-    tradePayoff: 0,
-    taxRate: 8,
-    tradeTaxCredit: true,
-    fees: 375,
-    apr: 6.9,
-    term: 72,
-    mpg: 27,
-    maint: 58,
-  });
-  const [current, setCurrent] = useState<CurrentInputs>({ commute: 42, currPay: 310, currMpg: 18, currMaint: 165, gasPrice: 3.45, insDelta: 18 });
+  const [deal, setDeal] = useState<DealInputs>(DEFAULT_DEAL);
+  const [current, setCurrent] = useState<CurrentInputs>(DEFAULT_CURRENT);
   const [scrub, setScrub] = useState(36);
   const [tab, setTab] = useState<Tab>("deal");
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [dealsOpen, setDealsOpen] = useState(false);
+  const [overlay, setOverlay] = useState<Overlay>(null);
   const [activeDeal, setActiveDeal] = useState<SavedDeal | null>(null);
   const [tradeCar, setTradeCar] = useState<TradeCar | null>(null);
   const [lookupKey, setLookupKey] = useState(0);
-  const { user, signOut } = useAuth();
-  const savedDeals = useSavedDeals();
-  const [authOpen, setAuthOpen] = useState(false);
-  const [authReason, setAuthReason] = useState<string | null>(null);
-  const [saveOpen, setSaveOpen] = useState(false);
-  const [pendingSave, setPendingSave] = useState(false);
-  const [specMpg, setSpecMpg] = useState<number | null>(null);
+  const [auth, setAuth] = useState<AuthPrompt>({ open: false, reason: null, thenSave: false });
+  const [spec, setSpec] = useState<SpecState>(IDLE_SPEC);
   const [presenting, setPresenting] = useState(false);
   const [pinned, setPinned] = useState<{ term: number; cash: number; payment: number; breakeven: number | null; series: SimPoint[] } | null>(null);
   const [lookup, setLookup] = useState("");
-  const [vinStatus, setVinStatus] = useState<"idle" | "loading" | "epa" | "estimate" | "none">("idle");
-  const [sheetStatus, setSheetStatus] = useState<"idle" | "syncing" | "ok" | "error">("idle");
-  const [sheetError, setSheetError] = useState<string | null>(null);
+  const { user, signOut } = useAuth();
+  const savedDeals = useSavedDeals();
   const vinReq = useRef(0);
   const specs = useServerFn(lookupVehicleSpecs);
-  const syncSheet = useServerFn(fetchSheetInventory);
 
   const setD = <K extends keyof DealInputs>(k: K) => (v: DealInputs[K]) => setDeal((d) => ({ ...d, [k]: v }));
   const setC = <K extends keyof CurrentInputs>(k: K) => (v: CurrentInputs[K]) => setCurrent((c) => ({ ...c, [k]: v }));
+  /** open/onOpenChange pair for one overlay; closing only clears it if it's still the open one. */
+  const overlayProps = (k: Exclude<Overlay, null>) => ({
+    open: overlay === k,
+    onOpenChange: (o: boolean) => setOverlay((cur) => (o ? k : cur === k ? null : cur)),
+  });
+
+  const lookupSpecs = async (v: Vehicle) => {
+    const id = ++vinReq.current;
+    setSpec({ status: "loading", mpg: null, engineFrom: v.engine ? "sheet" : null });
+    try {
+      const s = await unitSpecs(specs, v);
+      if (id !== vinReq.current) return;
+      if (s.source === "none") {
+        setSpec((p) => ({ ...p, status: "none" }));
+        return;
+      }
+      const useLookup = s.source === "epa" || v.epaMpg == null;
+      setSpec({
+        status: s.source,
+        mpg: useLookup && s.combMpg ? s.combMpg : null,
+        engineFrom: v.engine ? "sheet" : s.engine ? "lookup" : null,
+      });
+      // The sheet's engine spec wins; the VIN decode fills it in when the sheet has none.
+      setSelected((cur) =>
+        cur.stock === v.stock ? { ...cur, cityMpg: s.cityMpg, hwyMpg: s.hwyMpg, engine: v.engine || s.engine || null } : cur,
+      );
+      setDeal((d) => ({
+        ...d,
+        mpg: useLookup ? (s.combMpg ?? d.mpg) : d.mpg,
+        maint: v.estMaint == null && s.estMaint ? s.estMaint : d.maint,
+      }));
+    } catch {
+      if (id === vinReq.current) setSpec((p) => ({ ...p, status: "none" }));
+    }
+  };
 
   const applyVehicle = (v: Vehicle, lookupVin = true) => {
     setSelected(v);
@@ -137,105 +195,15 @@ function DeskPage() {
       mpg: v.epaMpg ?? d.mpg,
       maint: v.estMaint ?? estimateMaint(makeFromModel(v.makeModel), v.miles),
     }));
-    setVinStatus("idle");
-    setSpecMpg(null);
+    setSpec({ ...IDLE_SPEC, engineFrom: v.engine ? "sheet" : null });
     if (lookupVin) void lookupSpecs(v);
   };
 
-  const lookupSpecs = async (v: Vehicle) => {
-    const id = ++vinReq.current;
-    setVinStatus("loading");
-    try {
-      // VIN when the sheet has one, else year + make + model from the unit's name.
-      const hasVin = /^[A-HJ-NPR-Z0-9]{11,17}$/i.test(v.vin);
-      const [mk, ...rest] = v.makeModel.split(/\s+/);
-      const s = await specs({
-        data: hasVin ? { vin: v.vin, miles: v.miles } : { year: v.year, make: mk ?? null, model: rest.join(" ") || null, miles: v.miles },
-      });
-      if (id !== vinReq.current) return;
-      setVinStatus(s.source);
-      if (s.source === "none") return;
-      const useLookup = s.source === "epa" || v.epaMpg == null;
-      if (useLookup && s.combMpg) setSpecMpg(s.combMpg);
-      setSelected((cur) =>
-        cur.stock === v.stock ? { ...cur, cityMpg: s.cityMpg, hwyMpg: s.hwyMpg, engine: s.engine ?? cur.engine ?? null } : cur,
-      );
-      setDeal((d) => ({
-        ...d,
-        mpg: useLookup ? (s.combMpg ?? d.mpg) : d.mpg,
-        maint: v.estMaint == null && s.estMaint ? s.estMaint : d.maint,
-      }));
-    } catch {
-      if (id === vinReq.current) setVinStatus("none");
-    }
-  };
-
-  // Show the last saved inventory instantly, then refresh from the shared sheet.
-  useEffect(() => {
-    let shown: Vehicle | undefined;
-    try {
-      const saved = JSON.parse(localStorage.getItem("desk.inventory") || "null");
-      if (Array.isArray(saved) && saved.length) {
-        setInventory(saved);
-        setSource(localStorage.getItem("desk.source") || "Saved units");
-        shown = saved[0];
-        applyVehicle(saved[0], false);
-      }
-    } catch {
-      /* ignore bad saved data */
-    }
-
-    void runSheetSync(getSheetUrl(), shown?.stock);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const syncReq = useRef(0);
-  const selectedStockRef = useRef(selected.stock);
-  selectedStockRef.current = selected.stock;
-  const activeDealRef = useRef(activeDeal);
-  activeDealRef.current = activeDeal;
-  const runSheetSync = async (url: string, keepStock?: string) => {
-    const id = ++syncReq.current;
-    setSheetStatus("syncing");
-    try {
-      const res = await syncSheet({ data: { url } });
-      if (id !== syncReq.current) return;
-      if (res.error) {
-        setSheetStatus("error");
-        setSheetError(res.error);
-        return;
-      }
-      setSheetStatus("ok");
-      setSheetError(null);
-      const keep = keepStock ? res.vehicles.find((v) => v.stock === keepStock) : undefined;
-      // Don't overwrite an opened saved deal's numbers when the list refreshes underneath it.
-      const pick = keep && activeDealRef.current && keep.stock === selectedStockRef.current ? null : (keep ?? res.vehicles[0] ?? null);
-      replaceInventory(res.vehicles, `Sheet: ${res.tabName ?? "live"}`, pick);
-    } catch {
-      if (id !== syncReq.current) return;
-      setSheetStatus("error");
-      setSheetError("Couldn't reach the sheet. Showing the last saved units.");
-    }
-  };
-
-  // Signed in: use the sheet link saved to the account, so a new phone picks it up.
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    getAccountScriptUrl()
-      .then((url) => {
-        if (cancelled || !url || url === getSheetUrl()) return;
-        saveSheetUrl(url);
-        void runSheetSync(url, selectedStockRef.current);
-      })
-      .catch(() => {
-        /* keep the device link */
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  const { inventory, source, sheet, replace } = useInventory({
+    userId: user?.id,
+    onPick: applyVehicle,
+    getSelection: () => ({ stock: selected.stock, locked: !!activeDeal }),
+  });
 
   // Alt + C flips between Desk View and Customer View.
   useEffect(() => {
@@ -251,25 +219,18 @@ function DeskPage() {
 
   // Customer view hides everything internal, including the save/customer controls.
   useEffect(() => {
-    if (!presenting) return;
-    setSaveOpen(false);
-    setDealsOpen(false);
-    setPanelOpen(false);
+    if (presenting) setOverlay(null);
   }, [presenting]);
 
   // Tapped Save Customer while signed out → reopen the save form once signed in.
   useEffect(() => {
-    if (user && pendingSave) {
-      setPendingSave(false);
-      setSaveOpen(true);
+    if (user && auth.thenSave) {
+      setAuth((a) => ({ ...a, thenSave: false }));
+      setOverlay("save");
     }
-  }, [user, pendingSave]);
+  }, [user, auth.thenSave]);
 
-  const askSignIn = (reason: string | null, thenSave = false) => {
-    setAuthReason(reason);
-    setPendingSave(thenSave);
-    setAuthOpen(true);
-  };
+  const askSignIn = (reason: string | null, thenSave = false) => setAuth({ open: true, reason, thenSave });
 
   const loadSavedDeal = (d: SavedDeal) => {
     const live = d.proposedStock ? inventory.find((v) => v.stock === d.proposedStock) : undefined;
@@ -291,18 +252,6 @@ function DeskPage() {
     current,
   });
 
-  const replaceInventory = (list: Vehicle[], src: string, pick: Vehicle | null = list[0] ?? null) => {
-    setInventory(list);
-    setSource(src);
-    localStorage.setItem("desk.inventory", JSON.stringify(list));
-    localStorage.setItem("desk.source", src);
-    if (src.startsWith("Sheet")) {
-      setSheetStatus("ok");
-      setSheetError(null);
-    }
-    if (pick) applyVehicle(pick);
-  };
-
   const handleLookup = () => {
     const v = findByStock(inventory, lookup);
     if (!v) {
@@ -320,6 +269,7 @@ function DeskPage() {
   const point = sim.series[month] ?? sim.series[sim.series.length - 1]!;
   const odo = Math.round(selected.miles + (sim.annualMiles * month) / 12);
   const title = `${selected.year} ${selected.makeModel} ${selected.desc}`.trim();
+  const specBadge = spec.mpg != null && deal.mpg === spec.mpg && (spec.status === "epa" || spec.status === "estimate") ? spec.status : null;
 
   const breakevenText =
     sim.breakevenMonth === 0
@@ -345,13 +295,20 @@ function DeskPage() {
     return lines.filter(Boolean).join(" ");
   }, [sim, current.currPay, current.currMaint, deal.mpg, title]);
 
-  const termOptions = useMemo(
-    () =>
-      TERMS.map((t) => {
-        const s = simulate({ ...deal, term: t }, current, selected.miles);
-        return { term: t, payment: s.payment, breakeven: s.breakevenMonth };
-      }),
-    [deal, current, selected.miles],
+  // Term cards + "$1,000 more down" only depend on the loan side of the deal and yearly miles,
+  // so dragging MPG, repairs, gas price or the month scrubber doesn't recompute them.
+  const { price, cash, tradeValue, tradePayoff, taxRate, tradeTaxCredit, fees, apr, term } = deal;
+  const yearMiles = sim.annualMiles;
+  const termOptions = useMemo(() => {
+    const loan = { price, cash, tradeValue, tradePayoff, taxRate, tradeTaxCredit, fees, apr };
+    return TERMS.map((t) => {
+      const q = quickDeal({ ...loan, term: t }, yearMiles);
+      return { term: t, payment: q.payment, breakeven: q.breakevenMonth };
+    });
+  }, [price, cash, tradeValue, tradePayoff, taxRate, tradeTaxCredit, fees, apr, yearMiles]);
+  const moreDown = useMemo(
+    () => quickDeal({ price, cash: cash + 1000, tradeValue, tradePayoff, taxRate, tradeTaxCredit, fees, apr, term }, yearMiles),
+    [price, cash, tradeValue, tradePayoff, taxRate, tradeTaxCredit, fees, apr, term, yearMiles],
   );
   const milestones = useMemo(
     () => chartMilestones(selected.year, selected.miles, sim.annualMiles, sim.breakevenMonth, deal.term),
@@ -359,7 +316,6 @@ function DeskPage() {
   );
   const depRatePct = Math.round(annualDepreciationRate(sim.annualMiles) * 1000) / 10;
   const activePill = SERVICE_PILLS.find((p) => p.monthly === current.currMaint) ?? null;
-  const moreDown = useMemo(() => simulate({ ...deal, cash: deal.cash + 1000 }, current, selected.miles), [deal, current, selected.miles]);
 
   const shareSummary = async () => {
     const code = encodeSummary({ title, startMiles: selected.miles, modelYear: selected.year, deal, current });
@@ -392,14 +348,14 @@ function DeskPage() {
                 {activeDeal && !presenting ? activeDeal.customerName : "Deal Desk"}
               </h1>
               <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-                {sheetStatus === "syncing" && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
+                {sheet.status === "syncing" && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
                 <span className="truncate">
                   {presenting ? (
                     "Customer view"
                   ) : (
                     <>
-                      {sheetStatus === "syncing" ? "Loading shared sheet…" : source}
-                      {sheetStatus === "error" && " · sheet offline"}
+                      {sheet.status === "syncing" ? "Loading shared sheet…" : source}
+                      {sheet.status === "error" && " · sheet offline"}
                     </>
                   )}
                 </span>
@@ -424,8 +380,7 @@ function DeskPage() {
             {!presenting && (
               <>
                 <SaveCustomerPopover
-                  open={saveOpen}
-                  onOpenChange={setSaveOpen}
+                  {...overlayProps("save")}
                   activeDeal={activeDeal}
                   buildDraft={buildDraft}
                   onSaved={setActiveDeal}
@@ -436,7 +391,7 @@ function DeskPage() {
                   variant="secondary"
                   size="sm"
                   className="relative h-10"
-                  onClick={() => setDealsOpen(true)}
+                  onClick={() => setOverlay("deals")}
                   aria-label={`My customers${savedDeals.data ? ` (${savedDeals.data.length})` : ""}`}
                 >
                   <Users className="h-4 w-4" />
@@ -447,7 +402,7 @@ function DeskPage() {
                     </span>
                   )}
                 </Button>
-                <Button variant="secondary" size="sm" className="hidden h-10 lg:inline-flex" onClick={() => setPanelOpen(true)}>
+                <Button variant="secondary" size="sm" className="hidden h-10 lg:inline-flex" onClick={() => setOverlay("inventory")}>
                   <Warehouse className="h-4 w-4" />
                   <span className="hidden xl:inline">Inventory</span>
                 </Button>
@@ -546,11 +501,7 @@ function DeskPage() {
                   label="Fuel economy"
                   value={`${deal.mpg} MPG`}
                   sub={selected.cityMpg && selected.hwyMpg ? `${selected.cityMpg} city / ${selected.hwyMpg} hwy` : undefined}
-                  badge={
-                    specMpg != null && deal.mpg === specMpg && (vinStatus === "epa" || vinStatus === "estimate") ? (
-                      <SpecBadge kind={vinStatus} />
-                    ) : undefined
-                  }
+                  badge={specBadge ? <SpecBadge kind={specBadge} /> : undefined}
                 />
                 <Chip icon={<Wrench className="h-3.5 w-3.5" />} label="Maintenance" value={`${money(deal.maint)}/mo`} />
                 {!presenting && (
@@ -560,10 +511,18 @@ function DeskPage() {
                   </>
                 )}
                 <Chip
-                  icon={vinStatus === "loading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Car className="h-3.5 w-3.5" />}
+                  icon={spec.status === "loading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Car className="h-3.5 w-3.5" />}
                   label="Engine"
-                  value={vinStatus === "loading" ? "Checking EPA…" : selected.engine || "—"}
-                  sub={vinStatus === "epa" ? "Matched on fueleconomy.gov" : vinStatus === "estimate" ? "From VIN decode" : undefined}
+                  value={spec.status === "loading" && !selected.engine ? "Checking EPA…" : selected.engine || "—"}
+                  sub={
+                    spec.engineFrom === "sheet"
+                      ? "From your sheet"
+                      : spec.status === "epa"
+                        ? "Matched on fueleconomy.gov"
+                        : spec.status === "estimate"
+                          ? "From VIN decode"
+                          : undefined
+                  }
                 />
               </div>
               {selected.vin && <div className="num mt-3 truncate text-xs text-muted-foreground">VIN {selected.vin}</div>}
@@ -624,7 +583,7 @@ function DeskPage() {
                 </Field>
                 <Field label="Unit MPG">
                   <NumInput label="Proposed MPG" value={deal.mpg} onChange={setD("mpg")} suffix="mpg" decimals={1} />
-                  {specMpg != null && deal.mpg === specMpg && (vinStatus === "epa" || vinStatus === "estimate") && <SpecBadge kind={vinStatus} />}
+                  {specBadge && <SpecBadge kind={specBadge} />}
                 </Field>
                 <Field label="Unit maint.">
                   <NumInput label="Proposed maintenance per month" value={deal.maint} onChange={setD("maint")} prefix="$" suffix="/mo" decimals={0} />
@@ -944,23 +903,21 @@ function DeskPage() {
           <NavBtn active={tab === "deal"} onClick={() => setTab("deal")} icon={<Wallet className="h-5 w-5" />} label="Deal" />
           <NavBtn active={tab === "costs"} onClick={() => setTab("costs")} icon={<Fuel className="h-5 w-5" />} label="Costs" />
           <NavBtn active={tab === "equity"} onClick={() => setTab("equity")} icon={<LineChart className="h-5 w-5" />} label="Equity" />
-          {!presenting && <NavBtn active={panelOpen} onClick={() => setPanelOpen(true)} icon={<Warehouse className="h-5 w-5" />} label="Stock" />}
+          {!presenting && <NavBtn active={overlay === "inventory"} onClick={() => setOverlay("inventory")} icon={<Warehouse className="h-5 w-5" />} label="Stock" />}
         </div>
       </nav>
 
       <InventoryPanel
-        open={panelOpen}
-        onOpenChange={setPanelOpen}
+        {...overlayProps("inventory")}
         inventory={inventory}
         source={source}
         selectedStock={selected.stock}
-        sheetError={sheetError}
+        sheetError={sheet.error}
         onSelect={(v) => applyVehicle(v)}
-        onReplace={(list, src) => replaceInventory(list, src)}
+        onReplace={(list, src) => replace(list, src)}
       />
       <SavedDealsPanel
-        open={dealsOpen}
-        onOpenChange={setDealsOpen}
+        {...overlayProps("deals")}
         activeDeal={activeDeal}
         onLoad={loadSavedDeal}
         onDeleted={(id) => activeDeal?.id === id && setActiveDeal(null)}
@@ -969,11 +926,11 @@ function DeskPage() {
           toast("Next save creates a new customer");
         }}
         onSignIn={() => {
-          setDealsOpen(false);
+          setOverlay(null);
           askSignIn(null);
         }}
       />
-      <AuthDialog open={authOpen} onOpenChange={setAuthOpen} reason={authReason} />
+      <AuthDialog open={auth.open} onOpenChange={(open) => setAuth((a) => ({ ...a, open }))} reason={auth.reason} />
     </div>
   );
 }
