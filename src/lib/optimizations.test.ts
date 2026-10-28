@@ -37,7 +37,9 @@ describe("quickDeal (term cards / $1,000 more down)", () => {
 
   it("reports null when the customer stays upside down", () => {
     const upside = { ...deal, cash: 0, tradeValue: 0, tradePayoff: 8000, apr: 18.9, term: 84 };
-    expect(quickDeal(upside, 40000).breakevenMonth).toBe(simulate(upside, { ...current, commute: 40000 / 365 }, 0).breakevenMonth);
+    const full = simulate(upside, { ...current, commute: 110 }, 0);
+    expect(full.breakevenMonth).toBeNull();
+    expect(quickDeal(upside, full.annualMiles).breakevenMonth).toBeNull();
   });
 });
 
