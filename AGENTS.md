@@ -18,3 +18,7 @@
 - Customer "Share summary" links encode only deal inputs into `/summary?d=` (`src/lib/summary-link.ts`) and recompute with deal-math — stateless links with no backend and no internal lot data.
 - Accounts (Lovable Cloud auth: email, Google, Lovable) are optional — the desk works signed-out; signing in unlocks `saved_deals` and `user_settings`, read/written from the browser client (`src/lib/saved-deals.ts`) under own-rows-only RLS, so no server functions are needed.
 - Saved deal JSON shapes (`proposed_vehicle_json`, `trade_vehicle_json`, `deal_structure_json`) are built and parsed only in `src/lib/saved-deals.ts` with zod, so old rows load safely after fields change.
+- Sheet loading/caching/account-link sync lives in `src/hooks/use-inventory.ts`; the desk page only passes callbacks — keeps the page about the deal, not data plumbing.
+- VIN/EPA lookups are memoized per session in `src/lib/lookup-cache.ts` (failed/empty answers aren't kept) — revisiting a unit or reopening a customer skips repeat network calls.
+- Per-drag summaries (term cards, "$1,000 more down") use `quickDeal` from deal-math, not full `simulate` — same numbers without building the month series.
+- Only shadcn UI files the app imports are kept in `src/components/ui`; re-add others with the shadcn CLI when needed.

@@ -19,3 +19,7 @@
 - [x] Mileage-aware depreciation (±1.2%/yr per 1,000 mi vs 12k baseline) driving equity curve, crossover, $1k-more-down, odometer
 - [x] Service milestone pills next to current repairs (60k / 75–90k / 100k+) with breakdown
 - [x] Fix broken pasted lines in the current-car lookup file (build error)
+- [x] Cleanup: unused UI files + their libraries removed, one shared VIN check, desk state grouped, sheet sync moved to its own hook
+- [x] Faster term cards / $1,000-more-down; session memory for VIN and EPA lookups
+- [x] Sheet link box always shows the saved link; feed reads engine spec (updated Code_v2.gs)
+
