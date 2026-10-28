@@ -5,6 +5,8 @@ import { Check, Loader2, ScanLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { assumedMiles, estimateMaint, MILEAGE_BUCKETS } from "@/lib/deal-math";
+import { isVin } from "@/lib/inventory";
+import { vehicleLookupCache as cache } from "@/lib/lookup-cache";
 import { cn } from "@/lib/utils";
 import { getEpaMenu, getEpaVehicle, lookupVehicleSpecs } from "@/lib/vehicle.functions";
 
@@ -122,10 +124,16 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
     const id = ++req.current;
     setLoading(level);
     setError(null);
-    const res = await menu({ data: { level, year: Number(y), make: mk, model: md } }).catch(() => ({
-      items: [] as Item[],
-      error: "Couldn't load the list. Check the connection and try again.",
-    }));
+    const res = await cache
+      .get(
+        `menu:${level}:${y}:${mk}:${md}`,
+        () => menu({ data: { level, year: Number(y), make: mk, model: md } }),
+        (r) => !r.error,
+      )
+      .catch(() => ({
+        items: [] as Item[],
+        error: "Couldn't load the list. Check the connection and try again.",
+      }));
     if (id !== req.current) return;
     setLoading(null);
     if (res.error) setError(res.error);
@@ -175,7 +183,9 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
     const trimText = list.find((x) => x.value === t)?.text ?? "";
     const id = ++req.current;
     setLoading("mpg");
-    const res = await vehicle({ data: { id: t } }).catch(() => ({ combMpg: null, cityMpg: null, hwyMpg: null }));
+    const res = await cache
+      .get(`epa:${t}`, () => vehicle({ data: { id: t } }), (r) => r.combMpg != null)
+      .catch(() => ({ combMpg: null, cityMpg: null, hwyMpg: null }));
     if (id !== req.current) return;
     setLoading(null);
     if (!res.combMpg) setError("No EPA MPG for that trim. Enter MPG by hand.");
@@ -194,14 +204,17 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
 
   const lookupVin = async () => {
     const v = vin.trim().toUpperCase();
-    if (!/^[A-HJ-NPR-Z0-9]{11,17}$/.test(v)) {
+    if (!isVin(v)) {
       setError("Enter the 17-character VIN (no I, O or Q).");
       return;
     }
     const id = ++req.current;
     setLoading("vin");
     setError(null);
-    const s = await specs({ data: { vin: v, miles: miles?.miles ?? 0 } }).catch(() => null);
+    const m = miles?.miles ?? 0;
+    const s = await cache
+      .get(`specs:vin:${v}:${m}`, () => specs({ data: { vin: v, miles: m } }), (r) => r.source !== "none")
+      .catch(() => null);
     if (id !== req.current) return;
     setLoading(null);
     if (!s || s.source === "none" || !s.make) {
