@@ -390,11 +390,11 @@ const BRAND_DEPRECIATION_ADJ: Record<string, number> = {
 export interface BookValueInputs {
   year: number;
   make: string;
-  bodyClass?: string | null;
-  baseMsrp?: number | null;
+  bodyClass?: string | null | undefined;
+  baseMsrp?: number | null | undefined;
   miles: number;
-  condition?: BookCondition;
-  currentYear?: number;
+  condition?: BookCondition | undefined;
+  currentYear?: number | undefined;
 }
 
 export interface BookValueResult {
@@ -453,11 +453,11 @@ export function calculateBookValue({
 }
 
 export interface InsuranceDeltaInputs {
-  tradeYear?: number | null;
+  tradeYear?: number | null | undefined;
   tradeMSRP: number;
   proposedMSRP: number;
-  proposedYear?: number | null;
-  hasAdvancedSafety?: boolean;
+  proposedYear?: number | null | undefined;
+  hasAdvancedSafety?: boolean | undefined;
 }
 
 /**
