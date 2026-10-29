@@ -50,6 +50,7 @@ import {
   calculateBookValue,
   estimateInsuranceDelta,
   estimateMaint,
+  evaluateLtv,
   fallbackMsrp,
   lookupZipRates,
   makeFromModel,
@@ -58,6 +59,7 @@ import {
   simulate,
   type CurrentInputs,
   type DealInputs,
+  type LtvAssessment,
   type SimPoint,
 } from "@/lib/deal-math";
 import { findByStock, isVin, SAMPLE_INVENTORY, type Vehicle } from "@/lib/inventory";
@@ -398,6 +400,7 @@ function DeskPage() {
     [selected.year, selected.makeModel, selected.desc, selected.miles],
   );
   const belowRetail = bookValue.dealerRetail - deal.price;
+  const ltv = useMemo(() => evaluateLtv(sim.financed, bookValue.tradeInClean), [sim.financed, bookValue.tradeInClean]);
   const month = Math.min(Math.max(1, scrub), deal.term);
   const point = sim.series[month] ?? sim.series[sim.series.length - 1]!;
   const odo = Math.round(selected.miles + (sim.annualMiles * month) / 12);
@@ -807,6 +810,7 @@ function DeskPage() {
                 <span className="text-muted-foreground">Amount financed</span>
                 <span className="num font-semibold">{money(sim.financed)}</span>
               </div>
+              <LtvApprovalMeter ltv={ltv} onAddCash={(extra) => setD("cash")(deal.cash + extra)} />
             </div>
           </Panel>
 
@@ -1263,6 +1267,113 @@ function Stat({ label, value, sub, className }: { label: string; value: string; 
       <div className={cn("num mt-0.5 text-sm font-bold", className)}>
         {value}
         {sub && <span className="ml-0.5 text-[10px] font-medium text-muted-foreground">{sub}</span>}
+      </div>
+    </div>
+  );
+}
+
+const LTV_MIN = 60;
+const LTV_MAX = 140;
+const ltvPos = (pct: number) => Math.min(100, Math.max(0, ((pct - LTV_MIN) / (LTV_MAX - LTV_MIN)) * 100));
+
+function LtvApprovalMeter({ ltv, onAddCash }: { ltv: LtvAssessment; onAddCash: (extra: number) => void }) {
+  const markerPct = ltvPos(ltv.ltvPct);
+  const bookTick = ltvPos(100);
+  const stdCapTick = ltvPos(115);
+  const maxCapTick = ltvPos(125);
+
+  const toneClass =
+    ltv.status === "strong"
+      ? "border-gain/40 bg-gain/15 text-gain"
+      : ltv.status === "good"
+        ? "border-primary/40 bg-primary/15 text-primary"
+        : ltv.status === "stretch"
+          ? "border-cost/40 bg-cost/15 text-cost"
+          : "border-loss/40 bg-loss/15 text-loss";
+
+  const valueTextClass =
+    ltv.status === "strong"
+      ? "text-gain"
+      : ltv.status === "good"
+        ? "text-primary"
+        : ltv.status === "stretch"
+          ? "text-cost"
+          : "text-loss";
+
+  const overUnderText =
+    ltv.overBookPct > 0
+      ? `+${Math.round(ltv.overBookPct)}% over book`
+      : ltv.overBookPct < 0
+        ? `${Math.abs(Math.round(ltv.overBookPct))}% under book`
+        : "At book value";
+
+  return (
+    <div className="space-y-2.5 rounded-xl border border-border bg-background/60 p-3.5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Loan-to-Value (LTV) vs. Clean Book ({money(ltv.bookValue)})
+          </div>
+          <div className="mt-0.5 flex items-baseline gap-2">
+            <span className={cn("num text-xl font-bold", valueTextClass)}>{Math.round(ltv.ltvPct)}% LTV</span>
+            <span className="num text-xs font-medium text-muted-foreground">({overUnderText})</span>
+          </div>
+        </div>
+        <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold", toneClass)}>
+          {ltv.label}
+        </span>
+      </div>
+
+      {/* Segmented LTV gauge bar (60% – 140% scale) */}
+      <div className="pt-1">
+        <div className="relative h-3 w-full rounded-full bg-muted">
+          <div className="flex h-full w-full overflow-hidden rounded-full">
+            <div className="h-full bg-gain/75" style={{ width: `${bookTick}%` }} title="≤100% Book Value (High approval odds)" />
+            <div className="h-full bg-primary/75" style={{ width: `${stdCapTick - bookTick}%` }} title="100%–115% Standard Advance (Good approval odds)" />
+            <div className="h-full bg-cost/80" style={{ width: `${maxCapTick - stdCapTick}%` }} title="115%–125% High LTV Stretch (Conditional)" />
+            <div className="h-full flex-1 bg-loss/80" title=">125% Over Typical Lender Cap" />
+          </div>
+          {/* Threshold ticks */}
+          <span className="pointer-events-none absolute inset-y-0 w-0.5 bg-background/90" style={{ left: `${bookTick}%` }} />
+          <span className="pointer-events-none absolute inset-y-0 w-0.5 bg-background/90" style={{ left: `${stdCapTick}%` }} />
+          <span className="pointer-events-none absolute inset-y-0 w-0.5 bg-background/90" style={{ left: `${maxCapTick}%` }} />
+          {/* Live LTV marker */}
+          <span
+            className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-foreground shadow-md transition-all"
+            style={{ left: `${markerPct}%` }}
+            aria-hidden
+          />
+        </div>
+        <div className="relative mt-1.5 h-3.5 text-[10px] text-muted-foreground">
+          <span className="num absolute left-0">60%</span>
+          <span className="num absolute -translate-x-1/2 font-medium text-foreground" style={{ left: `${bookTick}%` }}>
+            100% Book
+          </span>
+          <span className="num absolute -translate-x-1/2" style={{ left: `${stdCapTick}%` }}>
+            115%
+          </span>
+          <span className="num absolute -translate-x-1/2" style={{ left: `${maxCapTick}%` }}>
+            125% Cap
+          </span>
+          <span className="num absolute right-0">140%</span>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5 text-xs">
+        <span className="text-muted-foreground">{ltv.summary}</span>
+        {ltv.cashNeededFor120Cap > 0 ? (
+          <button
+            type="button"
+            onClick={() => onAddCash(ltv.cashNeededFor120Cap)}
+            className="num shrink-0 rounded-lg border border-primary/40 bg-primary/15 px-2.5 py-1 font-semibold text-primary transition-colors active:bg-primary/25"
+          >
+            +{money(ltv.cashNeededFor120Cap)} down → 120% cap
+          </button>
+        ) : (
+          <span className="num shrink-0 text-muted-foreground">
+            <strong className="text-foreground">{money(ltv.cushionTo120Cap)}</strong> room under 120% cap
+          </span>
+        )}
       </div>
     </div>
   );

@@ -297,4 +297,27 @@ describe("book value & insurance estimator", () => {
     expect(ca?.tradeTaxCredit).toBe(false);
     expect(ca?.gasPrice).toBeGreaterThan(ny!.gasPrice);
   });
+
+  it("evaluates LTV percentage over book value and approval tiers", async () => {
+    const { evaluateLtv } = await import("./deal-math");
+    const under = evaluateLtv(21000, 24000);
+    expect(under.status).toBe("strong");
+    expect(under.ltvPct).toBe(87.5);
+    expect(under.overBookPct).toBe(-12.5);
+    expect(under.cashNeededFor120Cap).toBe(0);
+
+    const standard = evaluateLtv(26400, 24000);
+    expect(standard.status).toBe("good");
+    expect(standard.ltvPct).toBe(110);
+    expect(standard.overBookPct).toBe(10);
+
+    const stretch = evaluateLtv(28800, 24000);
+    expect(stretch.status).toBe("stretch");
+    expect(stretch.ltvPct).toBe(120);
+
+    const overCap = evaluateLtv(31200, 24000);
+    expect(overCap.status).toBe("over");
+    expect(overCap.ltvPct).toBe(130);
+    expect(overCap.cashNeededFor120Cap).toBe(2400);
+  });
 });

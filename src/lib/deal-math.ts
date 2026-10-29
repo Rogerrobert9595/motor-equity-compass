@@ -686,3 +686,95 @@ export function lookupZipRates(zip: string, nationalRegularGas = DEFAULT_NATIONA
     gasPrice,
   };
 }
+
+export type LtvStatus = "strong" | "good" | "stretch" | "over";
+
+export interface LtvAssessment {
+  /** Loan-to-value percentage (e.g. 108 = 108% of book). */
+  ltvPct: number;
+  /** Percentage points above (+) or below (-) 100% book value. */
+  overBookPct: number;
+  /** Book value benchmark used for the advance calculation. */
+  bookValue: number;
+  /** Amount financed compared against bookValue. */
+  financed: number;
+  status: LtvStatus;
+  label: string;
+  summary: string;
+  /** Extra cash down needed to reach the 120% standard bank cap (0 if already <= 120%). */
+  cashNeededFor120Cap: number;
+  /** Remaining advance room before hitting the 120% bank cap. */
+  cushionTo120Cap: number;
+}
+
+/**
+ * Evaluates Loan-to-Value (LTV) and financing approval likelihood based on Amount Financed vs. Book Value.
+ * - <= 100% LTV: Strong approval odds (at or under book)
+ * - 101%–115% LTV: Good approval odds (standard advance covering tax/fees)
+ * - 116%–125% LTV: Conditional / stretch advance (near bank LTV cap; needs strong credit or more down)
+ * - > 125% LTV: Low approval odds (exceeds typical 125% lender advance cap)
+ */
+export function evaluateLtv(financed: number, bookValue: number): LtvAssessment {
+  const safeBook = Math.max(1, bookValue);
+  const safeFinanced = Math.max(0, financed);
+  const rawPct = (safeFinanced / safeBook) * 100;
+  const ltvPct = Math.round(rawPct * 10) / 10;
+  const overBookPct = Math.round((rawPct - 100) * 10) / 10;
+  const cap120 = safeBook * 1.2;
+  const cashNeededFor120Cap = Math.max(0, Math.ceil(safeFinanced - cap120));
+  const cushionTo120Cap = Math.max(0, Math.floor(cap120 - safeFinanced));
+
+  if (ltvPct <= 100) {
+    return {
+      ltvPct,
+      overBookPct,
+      bookValue: safeBook,
+      financed: safeFinanced,
+      status: "strong",
+      label: "High approval odds",
+      summary:
+        overBookPct < 0
+          ? `Financed ${Math.abs(Math.round(overBookPct))}% under book — qualifies for prime lender tiers.`
+          : "Financed right at book value — qualifies for prime lender tiers.",
+      cashNeededFor120Cap,
+      cushionTo120Cap,
+    };
+  }
+  if (ltvPct <= 115) {
+    return {
+      ltvPct,
+      overBookPct,
+      bookValue: safeBook,
+      financed: safeFinanced,
+      status: "good",
+      label: "Good approval odds",
+      summary: `${Math.round(overBookPct)}% over book — within standard 115% bank advance for tax & fees.`,
+      cashNeededFor120Cap,
+      cushionTo120Cap,
+    };
+  }
+  if (ltvPct <= 125) {
+    return {
+      ltvPct,
+      overBookPct,
+      bookValue: safeBook,
+      financed: safeFinanced,
+      status: "stretch",
+      label: "Conditional · High LTV",
+      summary: `${Math.round(overBookPct)}% over book — near the 120%–125% lender cap; may require Tier 1–2 credit.`,
+      cashNeededFor120Cap,
+      cushionTo120Cap,
+    };
+  }
+  return {
+    ltvPct,
+    overBookPct,
+    bookValue: safeBook,
+    financed: safeFinanced,
+    status: "over",
+    label: "Low odds · Over cap",
+    summary: `${Math.round(overBookPct)}% over book — exceeds typical 125% max advance cap.`,
+    cashNeededFor120Cap,
+    cushionTo120Cap,
+  };
+}
