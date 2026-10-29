@@ -104,7 +104,7 @@ function SummaryPage() {
                 { k: "Payment", v: sim.payment, c: "bg-pay" },
                 { k: "Gas", v: sim.propGas, c: "bg-fuel" },
                 { k: "Repairs", v: deal.maint, c: "bg-maint" },
-                { k: "Insurance +", v: Math.max(0, current.insDelta), c: "bg-ins" },
+                { k: current.insDelta < 0 ? "Insurance" : "Insurance +", v: current.insDelta, c: "bg-ins" },
               ],
             },
           ]}

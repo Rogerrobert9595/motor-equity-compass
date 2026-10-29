@@ -30,11 +30,13 @@ function ResetPasswordPage() {
   const [validLink, setValidLink] = useState<boolean | null>(null);
 
   useEffect(() => {
-    const isRecovery = window.location.hash.includes("type=recovery");
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") setValidLink(true);
+    const isRecovery = window.location.hash.includes("type=recovery") || window.location.search.includes("code=");
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY" || (isRecovery && session)) setValidLink(true);
     });
-    void supabase.auth.getSession().then(({ data }) => setValidLink(isRecovery || !!data.session));
+    void supabase.auth.getSession().then(({ data }) => {
+      setValidLink((prev) => prev || isRecovery || !!data.session);
+    });
     return () => sub.subscription.unsubscribe();
   }, []);
 

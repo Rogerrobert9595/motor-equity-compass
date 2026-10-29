@@ -227,3 +227,53 @@ describe("service milestone pills", () => {
     for (const p of SERVICE_PILLS) expect(p.parts.reduce((s, x) => s + x.v, 0)).toBe(p.monthly);
   });
 });
+
+describe("book value & insurance estimator", () => {
+  it("calculates book value tiers with fallback MSRP and mileage adjustments", async () => {
+    const { calculateBookValue } = await import("./deal-math");
+    const suv = calculateBookValue({
+      year: 2024,
+      make: "Toyota",
+      bodyClass: "RAV4 XLE AWD",
+      baseMsrp: null,
+      miles: 24000,
+      currentYear: 2026,
+    });
+    expect(suv.dealerRetail).toBeGreaterThan(suv.privateParty);
+    expect(suv.privateParty).toBeGreaterThan(suv.tradeInClean);
+    expect(suv.tradeInClean).toBeGreaterThan(suv.tradeInAverage);
+    expect(suv.tradeInAverage).toBeGreaterThan(suv.tradeInRough);
+
+    const highMiles = calculateBookValue({
+      year: 2024,
+      make: "Toyota",
+      bodyClass: "RAV4 XLE AWD",
+      baseMsrp: null,
+      miles: 64000,
+      currentYear: 2026,
+    });
+    expect(highMiles.dealerRetail).toBeLessThan(suv.dealerRetail);
+  });
+
+  it("estimates monthly insurance delta from replacement cost ratio and clamps between $5 and $75", async () => {
+    const { estimateInsuranceDelta } = await import("./deal-math");
+    const modest = estimateInsuranceDelta({
+      tradeYear: 2018,
+      tradeMSRP: 36000,
+      proposedMSRP: 23999,
+      proposedYear: 2026,
+      hasAdvancedSafety: true,
+    });
+    expect(modest).toBe(5);
+
+    const stepUp = estimateInsuranceDelta({
+      tradeYear: 2016,
+      tradeMSRP: 24000,
+      proposedMSRP: 38000,
+      proposedYear: 2025,
+      hasAdvancedSafety: true,
+    });
+    expect(stepUp).toBeGreaterThan(20);
+    expect(stepUp).toBeLessThanOrEqual(75);
+  });
+});

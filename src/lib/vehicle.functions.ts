@@ -120,9 +120,10 @@ export async function fetchExactEpaMpg(
   let cyl: number | null = null;
   let fuel = "Gasoline";
 
-  if (vin && VIN_RE.test(vin)) {
+  const cleanVin = vin?.trim() || null;
+  if (cleanVin && VIN_RE.test(cleanVin)) {
     try {
-      const nhtsa = await getJson(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${vin}?format=json`);
+      const nhtsa = await getJson(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${cleanVin}?format=json`);
       const v = nhtsa?.Results?.[0];
       if (v?.Make) {
         make = v.Make;
@@ -195,11 +196,11 @@ export const lookupVehicleSpecs = createServerFn({ method: "POST" })
   .inputValidator((data) =>
     z
       .object({
-        vin: z.string().regex(VIN_RE).nullable().optional(),
+        vin: z.string().trim().regex(VIN_RE).nullable().optional(),
         year: z.number().int().min(0).max(2100).nullable().optional(),
         make: z.string().max(60).nullable().optional(),
         model: z.string().max(120).nullable().optional(),
-        miles: z.number(),
+        miles: z.number().finite().min(0),
       })
       .parse(data),
   )

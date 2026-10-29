@@ -54,8 +54,12 @@ export function useInventory({ userId, onPick, getSelection }: Options) {
   const replace = useCallback((list: Vehicle[], src: string, pick: Vehicle | null = list[0] ?? null) => {
     setInventory(list);
     setSource(src);
-    localStorage.setItem(LIST_KEY, JSON.stringify(list));
-    localStorage.setItem(SOURCE_KEY, src);
+    try {
+      localStorage.setItem(LIST_KEY, JSON.stringify(list));
+      localStorage.setItem(SOURCE_KEY, src);
+    } catch {
+      /* ignore quota / storage errors */
+    }
     if (src.startsWith("Sheet")) setSheet({ status: "ok", error: null });
     if (pick) pickRef.current(pick, true);
   }, []);

@@ -16,10 +16,11 @@ interface NumInputProps {
   prefix?: string;
   suffix?: string;
   decimals?: number;
+  allowNegative?: boolean;
   className?: string;
 }
 
-export function NumInput({ label, value, onChange, prefix, suffix, decimals = 2, className }: NumInputProps) {
+export function NumInput({ label, value, onChange, prefix, suffix, decimals = 2, allowNegative = false, className }: NumInputProps) {
   const [text, setText] = useState<string | null>(null);
   return (
     <label
@@ -32,7 +33,7 @@ export function NumInput({ label, value, onChange, prefix, suffix, decimals = 2,
       {prefix && <span className="text-sm text-muted-foreground">{prefix}</span>}
       <input
         type="text"
-        inputMode={decimals > 0 ? "decimal" : "numeric"}
+        inputMode={allowNegative ? "text" : decimals > 0 ? "decimal" : "numeric"}
         enterKeyHint="done"
         aria-label={label}
         className="num w-full min-w-0 bg-transparent text-right text-base font-medium outline-none"
@@ -45,7 +46,7 @@ export function NumInput({ label, value, onChange, prefix, suffix, decimals = 2,
         onChange={(e) => {
           setText(e.target.value);
           const n = parseFloat(e.target.value.replace(/[$,%\s]/g, ""));
-          if (Number.isFinite(n)) onChange(n);
+          if (Number.isFinite(n)) onChange(allowNegative ? n : Math.max(0, n));
         }}
         onBlur={() => setText(null)}
         onKeyDown={(e) => {

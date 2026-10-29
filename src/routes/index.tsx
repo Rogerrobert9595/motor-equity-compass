@@ -47,7 +47,10 @@ import { Switch } from "@/components/ui/switch";
 import {
   annualDepreciationRate,
   BASELINE_MILES,
+  calculateBookValue,
+  estimateInsuranceDelta,
   estimateMaint,
+  fallbackMsrp,
   makeFromModel,
   quickDeal,
   SERVICE_PILLS,
@@ -100,7 +103,14 @@ const DEFAULT_DEAL: DealInputs = {
   mpg: 27,
   maint: 58,
 };
-const DEFAULT_CURRENT: CurrentInputs = { commute: 42, currPay: 310, currMpg: 18, currMaint: 165, gasPrice: 3.45, insDelta: 18 };
+const DEFAULT_CURRENT: CurrentInputs = {
+  commute: 42,
+  currPay: 0,
+  currMpg: 0,
+  currMaint: 0,
+  gasPrice: 3.45,
+  insDelta: 0,
+};
 
 /** Proposed-unit EPA / VIN lookup state. `mpg` is the looked-up MPG (badge shows while the field still matches it). */
 interface SpecState {
@@ -123,9 +133,11 @@ type SpecsFn = ReturnType<typeof useServerFn<typeof lookupVehicleSpecs>>;
 function unitSpecs(fetchSpecs: SpecsFn, v: Vehicle) {
   // VIN when the sheet has one, else year + make + model from the unit's name.
   const [mk, ...rest] = v.makeModel.split(/\s+/);
+  const miles = Math.max(0, Number.isFinite(v.miles) ? v.miles : 0);
+  const year = Number.isInteger(v.year) && v.year >= 0 && v.year <= 2100 ? v.year : null;
   const data = isVin(v.vin)
-    ? { vin: v.vin.trim(), miles: v.miles }
-    : { year: v.year, make: mk ?? null, model: rest.join(" ") || null, miles: v.miles };
+    ? { vin: v.vin.trim(), miles }
+    : { year, make: mk ?? null, model: rest.join(" ") || null, miles };
   return vehicleLookupCache.get(`specs:${JSON.stringify(data)}`, () => fetchSpecs({ data }), (s) => s.source !== "none");
 }
 
@@ -147,6 +159,7 @@ function DeskPage() {
   const { user, signOut } = useAuth();
   const savedDeals = useSavedDeals();
   const vinReq = useRef(0);
+  const skipAutoInsRef = useRef(false);
   const specs = useServerFn(lookupVehicleSpecs);
 
   const setD = <K extends keyof DealInputs>(k: K) => (v: DealInputs[K]) => setDeal((d) => ({ ...d, [k]: v }));
@@ -157,7 +170,7 @@ function DeskPage() {
     onOpenChange: (o: boolean) => setOverlay((cur) => (o ? k : cur === k ? null : cur)),
   });
 
-  const lookupSpecs = async (v: Vehicle) => {
+  const lookupSpecs = async (v: Vehicle, preserveDeal = false) => {
     const id = ++vinReq.current;
     setSpec({ status: "loading", mpg: null, engineFrom: v.engine ? "sheet" : null });
     try {
@@ -177,11 +190,13 @@ function DeskPage() {
       setSelected((cur) =>
         cur.stock === v.stock ? { ...cur, cityMpg: s.cityMpg, hwyMpg: s.hwyMpg, engine: v.engine || s.engine || null } : cur,
       );
-      setDeal((d) => ({
-        ...d,
-        mpg: useLookup ? (s.combMpg ?? d.mpg) : d.mpg,
-        maint: v.estMaint == null && s.estMaint ? s.estMaint : d.maint,
-      }));
+      if (!preserveDeal) {
+        setDeal((d) => ({
+          ...d,
+          mpg: useLookup ? (s.combMpg ?? d.mpg) : d.mpg,
+          maint: v.estMaint == null && s.estMaint ? s.estMaint : d.maint,
+        }));
+      }
     } catch {
       if (id === vinReq.current) setSpec((p) => ({ ...p, status: "none" }));
     }
@@ -189,6 +204,7 @@ function DeskPage() {
 
   const applyVehicle = (v: Vehicle, lookupVin = true) => {
     setSelected(v);
+    setPinned(null);
     setDeal((d) => ({
       ...d,
       price: v.price,
@@ -230,12 +246,56 @@ function DeskPage() {
     }
   }, [user, auth.thenSave]);
 
+  // Automatically estimate insurance delta when both a proposed unit and a trade-in vehicle are selected.
+  useEffect(() => {
+    if (skipAutoInsRef.current) {
+      skipAutoInsRef.current = false;
+      return;
+    }
+    if (!tradeCar) return;
+    const tradeMSRP = fallbackMsrp(`${tradeCar.make ?? ""} ${tradeCar.model ?? ""} ${tradeCar.label ?? ""}`);
+    const insDelta = estimateInsuranceDelta({
+      tradeYear: tradeCar.year,
+      tradeMSRP,
+      proposedMSRP: selected.price,
+      proposedYear: selected.year,
+      hasAdvancedSafety: selected.year >= 2020,
+    });
+    setCurrent((c) => (c.insDelta === insDelta ? c : { ...c, insDelta }));
+  }, [selected.stock, selected.price, selected.year, tradeCar]);
+
   const askSignIn = (reason: string | null, thenSave = false) => setAuth({ open: true, reason, thenSave });
 
   const loadSavedDeal = (d: SavedDeal) => {
+    skipAutoInsRef.current = !!d.current;
     const live = d.proposedStock ? inventory.find((v) => v.stock === d.proposedStock) : undefined;
-    const v = d.vehicle ?? live;
-    if (v) applyVehicle(v, false);
+    const v: Vehicle | undefined =
+      d.vehicle && live
+        ? { ...live, ...d.vehicle }
+        : (d.vehicle ??
+          live ??
+          (d.proposedStock
+            ? {
+                stock: d.proposedStock,
+                loc: "LOT",
+                year: new Date().getUTCFullYear(),
+                makeModel: `Stock #${d.proposedStock}`,
+                desc: "",
+                miles: 0,
+                price: d.deal?.price ?? DEFAULT_DEAL.price,
+                days: 0,
+                stat: "S",
+                vin: "",
+                epaMpg: d.deal?.mpg ?? null,
+                estMaint: d.deal?.maint ?? null,
+              }
+            : undefined));
+    if (v) {
+      applyVehicle(v, false);
+      void lookupSpecs(v, !!d.deal);
+    } else {
+      setPinned(null);
+    }
     if (d.deal) setDeal(d.deal);
     if (d.current) setCurrent(d.current);
     setTradeCar(d.tradeCar);
@@ -265,6 +325,18 @@ function DeskPage() {
   };
 
   const sim = useMemo(() => simulate(deal, current, selected.miles), [deal, current, selected.miles]);
+  const bookValue = useMemo(
+    () =>
+      calculateBookValue({
+        year: selected.year,
+        make: makeFromModel(selected.makeModel),
+        bodyClass: `${selected.makeModel} ${selected.desc}`,
+        baseMsrp: null,
+        miles: selected.miles,
+      }),
+    [selected.year, selected.makeModel, selected.desc, selected.miles],
+  );
+  const belowRetail = bookValue.dealerRetail - deal.price;
   const month = Math.min(Math.max(1, scrub), deal.term);
   const point = sim.series[month] ?? sim.series[sim.series.length - 1]!;
   const odo = Math.round(selected.miles + (sim.annualMiles * month) / 12);
@@ -317,6 +389,16 @@ function DeskPage() {
   const depRatePct = Math.round(annualDepreciationRate(sim.annualMiles) * 1000) / 10;
   const activePill = SERVICE_PILLS.find((p) => p.monthly === current.currMaint) ?? null;
 
+  const copyText = async (text: string): Promise<boolean> => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      toast.error("Couldn't copy to clipboard");
+      return false;
+    }
+  };
+
   const shareSummary = async () => {
     const code = encodeSummary({ title, startMiles: selected.miles, modelYear: selected.year, deal, current });
     const url = `${window.location.origin}/summary?d=${code}`;
@@ -329,8 +411,9 @@ function DeskPage() {
         if ((err as Error)?.name === "AbortError") return;
       }
     }
-    await navigator.clipboard.writeText(url);
-    toast.success("Summary link copied", { action: { label: "Open", onClick: () => window.open(url, "_blank") } });
+    if (await copyText(url)) {
+      toast.success("Summary link copied", { action: { label: "Open", onClick: () => window.open(url, "_blank") } });
+    }
   };
 
   const show = (t: Tab) => cn(tab === t ? "block" : "hidden", "lg:block");
@@ -526,13 +609,44 @@ function DeskPage() {
                 />
               </div>
               {selected.vin && <div className="num mt-3 truncate text-xs text-muted-foreground">VIN {selected.vin}</div>}
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-background/60 px-3 py-2 text-xs">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="font-semibold uppercase tracking-wider text-muted-foreground">Market Book Value</span>
+                  <span>
+                    Retail <strong className="num text-foreground">{money(bookValue.dealerRetail)}</strong>
+                  </span>
+                  <span className="text-muted-foreground">·</span>
+                  <span>
+                    Clean Trade <strong className="num text-foreground">{money(bookValue.tradeInClean)}</strong>
+                  </span>
+                </div>
+                {belowRetail > 0 && (
+                  <span className="num inline-flex items-center rounded-full border border-gain/40 bg-gain/15 px-2.5 py-0.5 text-[11px] font-semibold text-gain">
+                    Priced {money(belowRetail)} below market retail
+                  </span>
+                )}
+              </div>
             </div>
           </section>
 
           {/* Deal structure */}
           <Panel title="Deal structure" kicker="Desk" className={show("deal")}>
             <div className="space-y-6">
-              <SliderField label="Selling price" value={deal.price} onChange={setD("price")} min={10000} max={75000} step={250} prefix="$" decimals={0} />
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs">
+                  <span className="text-muted-foreground">
+                    Market Book Value:{" "}
+                    <strong className="num text-foreground">{money(bookValue.dealerRetail)}</strong> retail ·{" "}
+                    <strong className="num text-foreground">{money(bookValue.tradeInClean)}</strong> clean trade
+                  </span>
+                  {belowRetail > 0 && (
+                    <span className="num rounded-full bg-gain/15 px-2 py-0.5 font-semibold text-gain">
+                      Priced {money(belowRetail)} below market retail
+                    </span>
+                  )}
+                </div>
+                <SliderField label="Selling price" value={deal.price} onChange={setD("price")} min={10000} max={75000} step={250} prefix="$" decimals={0} />
+              </div>
               <SliderField label="Cash down" value={deal.cash} onChange={setD("cash")} min={0} max={20000} step={250} prefix="$" decimals={0} />
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
@@ -615,7 +729,15 @@ function DeskPage() {
                 key={lookupKey}
                 onEstimate={({ mpg, maint, car }) => {
                   setTradeCar(car);
-                  setCurrent((c) => ({ ...c, currMpg: mpg ?? c.currMpg, currMaint: maint }));
+                  const tradeMSRP = fallbackMsrp(`${car.make} ${car.model} ${car.label}`);
+                  const insDelta = estimateInsuranceDelta({
+                    tradeYear: car.year,
+                    tradeMSRP,
+                    proposedMSRP: deal.price || selected.price,
+                    proposedYear: selected.year,
+                    hasAdvancedSafety: selected.year >= 2020,
+                  });
+                  setCurrent((c) => ({ ...c, currMpg: mpg ?? c.currMpg, currMaint: maint, insDelta }));
                 }}
               />
               {activeDeal && tradeCar?.label && (
@@ -678,12 +800,30 @@ function DeskPage() {
                     </div>
                   )}
                 </div>
-                <Field label="Gas price">
-                  <NumInput label="Gas price per gallon" value={current.gasPrice} onChange={setC("gasPrice")} prefix="$" suffix="/gal" />
-                </Field>
-                <Field label="Insurance change">
-                  <NumInput label="Insurance change per month" value={current.insDelta} onChange={setC("insDelta")} prefix="$" suffix="/mo" decimals={0} />
-                </Field>
+                <div className="col-span-2">
+                  <Field label="Gas price">
+                    <NumInput label="Gas price per gallon" value={current.gasPrice} onChange={setC("gasPrice")} prefix="$" suffix="/gal" />
+                  </Field>
+                </div>
+                <div className="col-span-2">
+                  <SliderField
+                    label="Insurance change"
+                    value={current.insDelta}
+                    onChange={setC("insDelta")}
+                    min={-50}
+                    max={100}
+                    step={1}
+                    prefix="$"
+                    suffix="/mo"
+                    decimals={0}
+                    allowNegative
+                    hint={
+                      tradeCar
+                        ? `Auto-estimated from #${selected.stock} vs. ${tradeCar.year ?? ""} ${tradeCar.model || tradeCar.make || "trade"}`
+                        : "Estimated monthly change · adjust if customer has a carrier quote"
+                    }
+                  />
+                </div>
               </div>
             </div>
           </Panel>
@@ -737,7 +877,7 @@ function DeskPage() {
                     { k: "Payment", v: sim.payment, c: "bg-pay" },
                     { k: "Gas", v: sim.propGas, c: "bg-fuel" },
                     { k: "Repairs", v: deal.maint, c: "bg-maint" },
-                    { k: "Insurance +", v: Math.max(0, current.insDelta), c: "bg-ins" },
+                    { k: current.insDelta < 0 ? "Insurance" : "Insurance +", v: current.insDelta, c: "bg-ins" },
                   ],
                 },
               ]}
@@ -867,8 +1007,7 @@ function DeskPage() {
                 variant="secondary"
                 className="h-11"
                 onClick={async () => {
-                  await navigator.clipboard.writeText(script);
-                  toast.success("Copied");
+                  if (await copyText(script)) toast.success("Copied");
                 }}
               >
                 <Copy className="h-4 w-4" /> Copy
@@ -883,8 +1022,7 @@ function DeskPage() {
                     } catch {
                       /* share cancelled */
                     }
-                  } else {
-                    await navigator.clipboard.writeText(text);
+                  } else if (await copyText(text)) {
                     toast.success("Copied — sharing isn't available on this device");
                   }
                 }}
@@ -923,6 +1061,9 @@ function DeskPage() {
         onDeleted={(id) => activeDeal?.id === id && setActiveDeal(null)}
         onNewCustomer={() => {
           setActiveDeal(null);
+          setTradeCar(null);
+          setCurrent(DEFAULT_CURRENT);
+          setLookupKey((k) => k + 1);
           toast("Next save creates a new customer");
         }}
         onSignIn={() => {

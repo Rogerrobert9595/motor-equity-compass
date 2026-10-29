@@ -147,6 +147,9 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
   };
 
   const pickYear = (y: string) => {
+    req.current++;
+    setLoading(null);
+    setError(null);
     setYear(y);
     setMake("");
     setModel("");
@@ -154,19 +157,27 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
     setMakes([]);
     setModels([]);
     setTrims([]);
+    setFound(null);
     if (y) void loadList("make", y);
   };
 
   const pickMake = (mk: string) => {
+    req.current++;
+    setLoading(null);
+    setError(null);
     setMake(mk);
     setModel("");
     setTrim("");
     setModels([]);
     setTrims([]);
+    setFound(null);
     if (mk) void loadList("model", year, mk);
   };
 
   const pickModel = (md: string) => {
+    req.current++;
+    setLoading(null);
+    setError(null);
     setModel(md);
     setTrim("");
     setTrims([]);
@@ -174,12 +185,19 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
       void loadList("options", year, make, md);
       // Repairs can be estimated as soon as the model is known; MPG fills in with the trim.
       setFound({ year: Number(year), make, model: md, vin: null, label: `${year} ${make} ${md}`, mpg: null, cityMpg: null, hwyMpg: null, mpgSource: null });
+    } else {
+      setFound(null);
     }
   };
 
   const pickTrim = async (t: string, list = trims, y = year, mk = make, md = model) => {
     setTrim(t);
-    if (!t) return;
+    if (!t) {
+      req.current++;
+      setLoading(null);
+      setFound((prev) => (prev ? { ...prev, label: `${y} ${mk} ${md}`, mpg: null, cityMpg: null, hwyMpg: null, mpgSource: null } : null));
+      return;
+    }
     const trimText = list.find((x) => x.value === t)?.text ?? "";
     const id = ++req.current;
     setLoading("mpg");
@@ -235,6 +253,8 @@ export function CurrentCarLookup({ onEstimate, milesPerYear }: Props) {
   };
 
   const switchMode = (m: Mode) => {
+    req.current++;
+    setLoading(null);
     setMode(m);
     setError(null);
   };

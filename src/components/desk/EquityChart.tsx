@@ -111,8 +111,8 @@ export function EquityChart({ series, month, breakeven, onScrub, pinned, milesto
       {pinned && (
         <g className="text-muted-foreground">
           <path d={line(pinned.series, "balance")} className="fill-none stroke-current" strokeWidth={2} strokeDasharray="6 5" />
-          {pb != null && pb > 0 && (
-            <circle cx={x(pb)} cy={y(pinned.series[pb]?.value ?? 0)} r={4} className="fill-background stroke-current" strokeWidth={2} />
+          {pb != null && pb >= 0 && pinned.series[pb] && (
+            <circle cx={x(pb)} cy={y(pinned.series[pb].value)} r={4} className="fill-background stroke-current" strokeWidth={2} />
           )}
         </g>
       )}

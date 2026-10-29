@@ -9,13 +9,21 @@ const LEGACY_KEY = "desk.sheetUrl";
 /** Link in use on this device: the saved link, else the built-in default. */
 export function getSheetUrl(): string {
   if (typeof window === "undefined") return DEFAULT_SCRIPT_URL;
-  // Old saved links pointed at a retired deployment; drop them so the new default wins.
-  localStorage.removeItem(LEGACY_KEY);
-  return localStorage.getItem(SCRIPT_URL_KEY)?.trim() || DEFAULT_SCRIPT_URL;
+  try {
+    // Old saved links pointed at a retired deployment; drop them so the new default wins.
+    localStorage.removeItem(LEGACY_KEY);
+    return localStorage.getItem(SCRIPT_URL_KEY)?.trim() || DEFAULT_SCRIPT_URL;
+  } catch {
+    return DEFAULT_SCRIPT_URL;
+  }
 }
 
 export function saveSheetUrl(url: string) {
   const u = url.trim();
-  if (!u) localStorage.removeItem(SCRIPT_URL_KEY);
-  else localStorage.setItem(SCRIPT_URL_KEY, u);
+  try {
+    if (!u) localStorage.removeItem(SCRIPT_URL_KEY);
+    else localStorage.setItem(SCRIPT_URL_KEY, u);
+  } catch {
+    /* ignore storage errors in restricted contexts */
+  }
 }

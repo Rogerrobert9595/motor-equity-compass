@@ -9,9 +9,17 @@ export interface Milestones {
 }
 
 /** Warranty cliff + sweet-spot trade window for the equity chart. */
-export function chartMilestones(modelYear: number, startMiles: number, milesPerYear: number, breakeven: number | null, term: number): Milestones {
+export function chartMilestones(
+  modelYear: number,
+  startMiles: number,
+  milesPerYear: number,
+  breakeven: number | null,
+  term: number,
+  now?: { year: number; month: number },
+): Milestones {
   const d = new Date();
-  const cliff = warrantyCliff(modelYear, startMiles, milesPerYear, { year: d.getFullYear(), month: d.getMonth() });
+  const current = now ?? { year: d.getUTCFullYear(), month: d.getUTCMonth() };
+  const cliff = warrantyCliff(modelYear, startMiles, milesPerYear, current);
   const w = cliff ? WARRANTY[cliff.kind] : null;
   const warranty =
     cliff && w && cliff.month <= term

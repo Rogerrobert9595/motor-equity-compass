@@ -186,3 +186,15 @@
     padding: 1.75rem;
   }
 }
+
+/* Hide the injected "Edit with Lovable" badge. */
+#lovable-badge,
+[id^="lovable-badge"],
+[class*="lovable-badge"],
+a[href*="utm_source=lovable-badge"],
+lovable-badge {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

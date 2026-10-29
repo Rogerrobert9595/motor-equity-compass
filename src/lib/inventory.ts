@@ -124,7 +124,7 @@ export function normalizeSheetJson(json: unknown): Vehicle[] {
       estMaint: toNum(u.estMaint),
       engine: toText(u.engineSpec ?? u.engine),
     }))
-    .filter((v) => v.stock && v.makeModel && !Number.isNaN(v.year));
+    .filter((v) => v.stock && v.makeModel && !Number.isNaN(v.year) && v.price > 0);
 }
 
 export function findByStock(list: Vehicle[], query: string): Vehicle | undefined {

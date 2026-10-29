@@ -334,3 +334,152 @@ export function tradeWindow(breakeven: number | null, cliffMonth: number | null,
   end = Math.min(term, Math.max(end, start + 3));
   return { start, end };
 }
+
+export type BodyCategory = "Truck" | "SUV" | "Sedan";
+export type BookCondition = "clean" | "average" | "rough";
+
+const TRUCK_RE =
+  /\b(truck|pickup|supercrew|crew\s*cab|double\s*cab|quad\s*cab|f-?150|f-?250|f-?350|silverado|sierra|ram\s*1500|ram\s*2500|tacoma|tundra|ranger|colorado|canyon|frontier|titan|gladiator|maverick|ridgeline)\b/i;
+const SUV_RE =
+  /\b(suv|crossover|cuv|utility|sport\s*utility|4x4|awd|4wd|rav4|cr-?v|hr-?v|pilot|passport|highlander|4runner|sequoia|venza|corolla\s*cross|equinox|blazer|trailblazer|trax|traverse|tahoe|suburban|encore|envision|enclave|terrain|acadia|yukon|tucson|santa\s*fe|palisade|kona|venue|sportage|sorento|telluride|seltos|soul|cherokee|grand\s*cherokee|wrangler|compass|renegade|wagoneer|durango|hornet|explorer|escape|edge|bronco|expedition|rogue|murano|pathfinder|armada|kicks|outback|forester|crosstrek|ascent|cx-?30|cx-?5|cx-?50|cx-?70|cx-?90|tiguan|atlas|taos|q3|q5|q7|x1|x3|x5|glc|gle|rx|nx|gx|mdx|rdx|xt4|xt5|xt6|escalade|navigator|corsair|aviator|nautilus)\b/i;
+
+/** Categorize a bodyClass or vehicle model/description into Truck, SUV, or Sedan. */
+export function inferBodyClass(bodyClass?: string | null): BodyCategory {
+  const s = (bodyClass ?? "").trim();
+  if (TRUCK_RE.test(s)) return "Truck";
+  if (SUV_RE.test(s)) return "SUV";
+  return "Sedan";
+}
+
+const FALLBACK_MSRP: Record<BodyCategory, number> = {
+  Truck: 46000,
+  SUV: 36000,
+  Sedan: 29000,
+};
+
+/** Fallback original MSRP by body style when the exact sticker price isn't known. */
+export function fallbackMsrp(bodyClass?: string | null): number {
+  return FALLBACK_MSRP[inferBodyClass(bodyClass)];
+}
+
+const BASE_CATEGORY_DEPRECIATION: Record<BodyCategory, number> = {
+  Truck: 0.115,
+  SUV: 0.145,
+  Sedan: 0.17,
+};
+
+/** Subtle brand retention adjustment around the body-class depreciation rate. */
+const BRAND_DEPRECIATION_ADJ: Record<string, number> = {
+  TOYOTA: -0.01,
+  LEXUS: -0.01,
+  HONDA: -0.008,
+  SUBARU: -0.006,
+  MAZDA: -0.003,
+  HYUNDAI: 0,
+  KIA: 0,
+  FORD: 0,
+  CHEVROLET: 0,
+  GMC: 0,
+  BUICK: 0.003,
+  JEEP: 0.003,
+  RAM: 0.003,
+  DODGE: 0.008,
+  CHRYSLER: 0.01,
+};
+
+export interface BookValueInputs {
+  year: number;
+  make: string;
+  bodyClass?: string | null;
+  baseMsrp?: number | null;
+  miles: number;
+  condition?: BookCondition;
+  currentYear?: number;
+}
+
+export interface BookValueResult {
+  tradeInClean: number;
+  tradeInAverage: number;
+  tradeInRough: number;
+  privateParty: number;
+  dealerRetail: number;
+}
+
+/**
+ * Zero-cost algorithmic book value engine.
+ * - Uses `baseMsrp` when provided, else falls back by `bodyClass` (Truck: $46k, SUV: $36k, Sedan: $29k).
+ * - Applies a first-year drive-off retention of 84%, then a brand- & body-specific annual depreciation rate
+ *   (Trucks ~11.5%, SUVs ~14.5%, Sedans ~17%).
+ * - Adjusts for mileage against a 12,000 mi/yr baseline (+/- 2.2% per 10k miles).
+ */
+export function calculateBookValue({
+  year,
+  make,
+  bodyClass,
+  baseMsrp,
+  miles,
+  condition = "average",
+  currentYear = new Date().getUTCFullYear(),
+}: BookValueInputs): BookValueResult {
+  const category = inferBodyClass(bodyClass);
+  const msrp = baseMsrp != null && baseMsrp > 0 ? baseMsrp : FALLBACK_MSRP[category];
+  const brandAdj = BRAND_DEPRECIATION_ADJ[make.trim().toUpperCase()] ?? 0;
+  const annualRate = Math.min(0.28, Math.max(0.06, BASE_CATEGORY_DEPRECIATION[category] + brandAdj));
+
+  const age = Math.max(0, currentYear - year);
+  // 84% first-year drive-off retention, followed by compound annual depreciation for subsequent years.
+  const ageRetention = 0.84 * Math.pow(1 - annualRate, Math.max(0, age - 1));
+
+  const expectedMiles = Math.max(1, age) * BASELINE_MILES;
+  const mileDelta = expectedMiles - Math.max(0, miles);
+  const mileageFactor = Math.min(1.25, Math.max(0.65, 1 + (mileDelta / 10000) * 0.022));
+
+  const conditionFactor = condition === "clean" ? 1.06 : condition === "rough" ? 0.9 : 1;
+  const baseTrade = Math.max(msrp * 0.1, msrp * ageRetention * mileageFactor * conditionFactor);
+
+  const tradeInAverage = Math.round(baseTrade);
+  const tradeInClean = Math.round(baseTrade * 1.07);
+  const tradeInRough = Math.round(baseTrade * 0.88);
+  const privateParty = Math.round(baseTrade * 1.12);
+  const dealerRetail = Math.round(baseTrade * 1.2);
+
+  return {
+    tradeInClean,
+    tradeInAverage,
+    tradeInRough,
+    privateParty,
+    dealerRetail,
+  };
+}
+
+export interface InsuranceDeltaInputs {
+  tradeYear?: number | null;
+  tradeMSRP: number;
+  proposedMSRP: number;
+  proposedYear?: number | null;
+  hasAdvancedSafety?: boolean;
+}
+
+/**
+ * Algorithmic monthly insurance change estimator.
+ * - Replacement cost ratio = `proposedMSRP / tradeMSRP`
+ * - Base national premium = $130/mo, scaled by `Math.pow(ratio, 0.35)`
+ * - 0.92 multiplier when `hasAdvancedSafety` is true
+ * - Subtracts the older trade's estimated premium (`base * 0.85`)
+ * - Clamped between $5 and $75/mo
+ */
+export function estimateInsuranceDelta({
+  tradeMSRP,
+  proposedMSRP,
+  hasAdvancedSafety = true,
+}: InsuranceDeltaInputs): number {
+  const base = 130;
+  const safeTrade = tradeMSRP > 0 ? tradeMSRP : FALLBACK_MSRP.Sedan;
+  const safeProposed = proposedMSRP > 0 ? proposedMSRP : FALLBACK_MSRP.Sedan;
+  const ratio = safeProposed / safeTrade;
+  const safetyMultiplier = hasAdvancedSafety ? 0.92 : 1;
+  const proposedPremium = base * Math.pow(ratio, 0.35) * safetyMultiplier;
+  const tradePremium = base * 0.85;
+  const delta = proposedPremium - tradePremium;
+  return Math.round(Math.min(75, Math.max(5, delta)));
+}

@@ -66,6 +66,17 @@ describe("sheet engine spec", () => {
     expect(v?.engine).toBeNull();
   });
 
+  it("skips sheet vehicles with missing or zero price", () => {
+    const list = normalizeSheetJson({
+      vehicles: [
+        { stock: "1", year: 2024, makeModel: "Toyota RAV4", price: 0 },
+        { stock: "2", year: 2024, makeModel: "Honda Civic", price: 22750 },
+      ],
+    });
+    expect(list).toHaveLength(1);
+    expect(list[0]?.stock).toBe("2");
+  });
+
   it("reads the engine column from pasted rows", () => {
     const row = ["S", "2-48134", "2026", "Buick Encore GX", "AWD", "11,604", "$23,999", "39", "S", "KL4AMCSL0TB008832", "", "27", "58", "1.3L 3-Cyl (Gasoline)"].join("\t");
     expect(parsePastedRows(row)[0]?.engine).toBe("1.3L 3-Cyl (Gasoline)");

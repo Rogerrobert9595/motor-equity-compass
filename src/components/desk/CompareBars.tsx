@@ -12,12 +12,13 @@ export interface BarRow {
  * filled with a dashed "back in pocket" ghost block.
  */
 export function CompareBars({ rows }: { rows: BarRow[] }) {
-  const totals = rows.map((r) => r.parts.reduce((s, p) => s + Math.max(0, p.v), 0));
+  const totals = rows.map((r) => Math.max(0, r.parts.reduce((s, p) => s + p.v, 0)));
   const max = Math.max(1, ...totals);
   return (
     <div className="space-y-5">
       {rows.map((r, i) => {
         const total = totals[i] ?? 0;
+        const posTotal = r.parts.reduce((s, p) => s + Math.max(0, p.v), 0);
         const gap = max - total;
         const ghost = i === rows.length - 1 && i > 0 && gap >= 1;
         const ghostPct = (gap / max) * 100;
@@ -38,7 +39,7 @@ export function CompareBars({ rows }: { rows: BarRow[] }) {
               >
                 {r.parts.map((p) =>
                   p.v > 0 ? (
-                    <div key={p.k} className={cn(p.c, "h-full")} style={{ width: `${(p.v / (total || 1)) * 100}%` }} title={`${p.k} ${money(p.v)}`} />
+                    <div key={p.k} className={cn(p.c, "h-full")} style={{ width: `${(p.v / (posTotal || 1)) * 100}%` }} title={`${p.k} ${money(p.v)}`} />
                   ) : null,
                 )}
               </div>
