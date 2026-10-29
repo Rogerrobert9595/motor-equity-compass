@@ -276,4 +276,25 @@ describe("book value & insurance estimator", () => {
     expect(stepUp).toBeGreaterThan(20);
     expect(stepUp).toBeLessThanOrEqual(75);
   });
+
+  it("looks up local sales tax rate, trade tax credit rule, and gas price by ZIP code", async () => {
+    const { lookupZipRates, stateFromZip } = await import("./deal-math");
+    expect(stateFromZip("14623")).toBe("NY");
+    expect(stateFromZip("90210")).toBe("CA");
+
+    const ny = lookupZipRates("14623", 3.35);
+    expect(ny).toEqual({
+      zip: "14623",
+      state: "NY",
+      region: "Rochester, NY",
+      taxRate: 8.0,
+      tradeTaxCredit: true,
+      gasPrice: 3.49,
+    });
+
+    const ca = lookupZipRates("90210", 3.35);
+    expect(ca?.state).toBe("CA");
+    expect(ca?.tradeTaxCredit).toBe(false);
+    expect(ca?.gasPrice).toBeGreaterThan(ny!.gasPrice);
+  });
 });

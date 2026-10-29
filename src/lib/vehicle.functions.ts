@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { estimateMaint, estimateMpg } from "./deal-math";
+import { estimateMaint, estimateMpg, lookupZipRates, type ZipRateInfo } from "./deal-math";
 import { normalizeSheetJson, VIN_RE, type Vehicle } from "./inventory";
 
 const ALLOWED_SHEET_HOSTS = ["script.google.com", "script.googleusercontent.com"];
@@ -254,4 +254,33 @@ export const getSafetyRecords = createServerFn({ method: "POST" })
       if (recalls || complaints) break;
     }
     return out;
+  });
+
+export interface LocalZipRates extends ZipRateInfo {
+  source: "live" | "regional";
+}
+
+/** Local regular gas price (EIA/EPA live feed + regional offset) and auto sales tax rate by 5-digit ZIP code. */
+export const lookupLocalRates = createServerFn({ method: "POST" })
+  .inputValidator((data) => z.object({ zip: z.string().trim().regex(/^\d{5}$/) }).parse(data))
+  .handler(async ({ data }): Promise<LocalZipRates | null> => {
+    const [fuelRes, placeRes] = await Promise.all([
+      getJson("https://www.fueleconomy.gov/ws/rest/fuelprices").catch(() => null),
+      getJson(`https://api.zippopotam.us/us/${data.zip}`).catch(() => null),
+    ]);
+    const liveNatGas = parseFloat(String(fuelRes?.regular ?? ""));
+    const base = lookupZipRates(data.zip, Number.isFinite(liveNatGas) && liveNatGas > 1 ? liveNatGas : undefined);
+    if (!base) return null;
+
+    const place = placeRes?.places?.[0];
+    const city = typeof place?.["place name"] === "string" ? place["place name"].trim() : "";
+    const st = typeof place?.["state abbreviation"] === "string" ? place["state abbreviation"].trim() : base.state;
+    const region = city ? `${city}, ${st}` : base.region;
+
+    return {
+      ...base,
+      state: st || base.state,
+      region,
+      source: Number.isFinite(liveNatGas) && liveNatGas > 1 ? "live" : "regional",
+    };
   });

@@ -483,3 +483,206 @@ export function estimateInsuranceDelta({
   const delta = proposedPremium - tradePremium;
   return Math.round(Math.min(75, Math.max(5, delta)));
 }
+
+export interface ZipRateInfo {
+  zip: string;
+  state: string;
+  region: string;
+  taxRate: number;
+  tradeTaxCredit: boolean;
+  gasPrice: number;
+}
+
+interface StateRateMeta {
+  name: string;
+  taxRate: number;
+  tradeTaxCredit: boolean;
+  gasOffset: number; // $/gal relative to US national regular average
+}
+
+const DEFAULT_NATIONAL_GAS = 3.35;
+
+/** Combined auto sales tax rate, trade-in tax credit rule, and regional gas price offset by state. */
+const STATE_RATES: Record<string, StateRateMeta> = {
+  AL: { name: "Alabama", taxRate: 4.0, tradeTaxCredit: true, gasOffset: -0.32 },
+  AK: { name: "Alaska", taxRate: 0.0, tradeTaxCredit: true, gasOffset: 0.55 },
+  AZ: { name: "Arizona", taxRate: 8.3, tradeTaxCredit: true, gasOffset: 0.25 },
+  AR: { name: "Arkansas", taxRate: 6.5, tradeTaxCredit: true, gasOffset: -0.35 },
+  CA: { name: "California", taxRate: 8.85, tradeTaxCredit: false, gasOffset: 1.35 },
+  CO: { name: "Colorado", taxRate: 7.8, tradeTaxCredit: true, gasOffset: -0.05 },
+  CT: { name: "Connecticut", taxRate: 6.35, tradeTaxCredit: true, gasOffset: 0.1 },
+  DE: { name: "Delaware", taxRate: 4.25, tradeTaxCredit: true, gasOffset: -0.08 },
+  DC: { name: "Washington, DC", taxRate: 6.0, tradeTaxCredit: false, gasOffset: 0.18 },
+  FL: { name: "Florida", taxRate: 7.0, tradeTaxCredit: true, gasOffset: -0.05 },
+  GA: { name: "Georgia", taxRate: 7.0, tradeTaxCredit: true, gasOffset: -0.2 },
+  HI: { name: "Hawaii", taxRate: 4.5, tradeTaxCredit: false, gasOffset: 1.25 },
+  ID: { name: "Idaho", taxRate: 6.0, tradeTaxCredit: true, gasOffset: 0.15 },
+  IL: { name: "Illinois", taxRate: 8.25, tradeTaxCredit: true, gasOffset: 0.28 },
+  IN: { name: "Indiana", taxRate: 7.0, tradeTaxCredit: true, gasOffset: 0.02 },
+  IA: { name: "Iowa", taxRate: 5.0, tradeTaxCredit: true, gasOffset: -0.22 },
+  KS: { name: "Kansas", taxRate: 7.5, tradeTaxCredit: true, gasOffset: -0.28 },
+  KY: { name: "Kentucky", taxRate: 6.0, tradeTaxCredit: true, gasOffset: -0.22 },
+  LA: { name: "Louisiana", taxRate: 9.55, tradeTaxCredit: true, gasOffset: -0.38 },
+  ME: { name: "Maine", taxRate: 5.5, tradeTaxCredit: true, gasOffset: 0.05 },
+  MD: { name: "Maryland", taxRate: 6.0, tradeTaxCredit: false, gasOffset: 0.02 },
+  MA: { name: "Massachusetts", taxRate: 6.25, tradeTaxCredit: true, gasOffset: 0.05 },
+  MI: { name: "Michigan", taxRate: 6.0, tradeTaxCredit: true, gasOffset: 0.05 },
+  MN: { name: "Minnesota", taxRate: 6.875, tradeTaxCredit: true, gasOffset: -0.12 },
+  MS: { name: "Mississippi", taxRate: 5.0, tradeTaxCredit: true, gasOffset: -0.4 },
+  MO: { name: "Missouri", taxRate: 7.25, tradeTaxCredit: true, gasOffset: -0.3 },
+  MT: { name: "Montana", taxRate: 0.0, tradeTaxCredit: true, gasOffset: -0.05 },
+  NE: { name: "Nebraska", taxRate: 6.5, tradeTaxCredit: true, gasOffset: -0.2 },
+  NV: { name: "Nevada", taxRate: 8.25, tradeTaxCredit: true, gasOffset: 0.55 },
+  NH: { name: "New Hampshire", taxRate: 0.0, tradeTaxCredit: true, gasOffset: -0.02 },
+  NJ: { name: "New Jersey", taxRate: 6.625, tradeTaxCredit: true, gasOffset: -0.05 },
+  NM: { name: "New Mexico", taxRate: 4.0, tradeTaxCredit: true, gasOffset: -0.18 },
+  NY: { name: "New York", taxRate: 8.0, tradeTaxCredit: true, gasOffset: 0.15 },
+  NC: { name: "North Carolina", taxRate: 3.0, tradeTaxCredit: true, gasOffset: -0.15 },
+  ND: { name: "North Dakota", taxRate: 5.0, tradeTaxCredit: true, gasOffset: -0.18 },
+  OH: { name: "Ohio", taxRate: 7.25, tradeTaxCredit: true, gasOffset: -0.08 },
+  OK: { name: "Oklahoma", taxRate: 4.5, tradeTaxCredit: false, gasOffset: -0.35 },
+  OR: { name: "Oregon", taxRate: 0.5, tradeTaxCredit: true, gasOffset: 0.6 },
+  PA: { name: "Pennsylvania", taxRate: 6.0, tradeTaxCredit: true, gasOffset: 0.2 },
+  RI: { name: "Rhode Island", taxRate: 7.0, tradeTaxCredit: true, gasOffset: 0.05 },
+  SC: { name: "South Carolina", taxRate: 5.0, tradeTaxCredit: true, gasOffset: -0.28 },
+  SD: { name: "South Dakota", taxRate: 4.0, tradeTaxCredit: true, gasOffset: -0.15 },
+  TN: { name: "Tennessee", taxRate: 7.0, tradeTaxCredit: true, gasOffset: -0.3 },
+  TX: { name: "Texas", taxRate: 6.25, tradeTaxCredit: true, gasOffset: -0.35 },
+  UT: { name: "Utah", taxRate: 7.15, tradeTaxCredit: true, gasOffset: 0.05 },
+  VT: { name: "Vermont", taxRate: 6.0, tradeTaxCredit: true, gasOffset: 0.12 },
+  VA: { name: "Virginia", taxRate: 4.15, tradeTaxCredit: false, gasOffset: -0.12 },
+  WA: { name: "Washington", taxRate: 9.2, tradeTaxCredit: true, gasOffset: 0.85 },
+  WV: { name: "West Virginia", taxRate: 6.0, tradeTaxCredit: true, gasOffset: -0.08 },
+  WI: { name: "Wisconsin", taxRate: 5.5, tradeTaxCredit: true, gasOffset: -0.12 },
+  WY: { name: "Wyoming", taxRate: 5.25, tradeTaxCredit: true, gasOffset: -0.1 },
+};
+
+/** 3-digit ZIP prefix ranges mapped to US state codes. */
+const ZIP_PREFIX_RANGES: Array<[number, number, string]> = [
+  [5, 5, "NY"],
+  [10, 27, "MA"],
+  [28, 29, "RI"],
+  [30, 38, "NH"],
+  [39, 49, "ME"],
+  [50, 59, "VT"],
+  [60, 69, "CT"],
+  [70, 89, "NJ"],
+  [100, 149, "NY"],
+  [150, 196, "PA"],
+  [197, 199, "DE"],
+  [200, 205, "DC"],
+  [206, 219, "MD"],
+  [220, 246, "VA"],
+  [247, 268, "WV"],
+  [270, 289, "NC"],
+  [290, 299, "SC"],
+  [300, 319, "GA"],
+  [320, 349, "FL"],
+  [350, 369, "AL"],
+  [370, 385, "TN"],
+  [386, 397, "MS"],
+  [398, 399, "GA"],
+  [400, 427, "KY"],
+  [430, 459, "OH"],
+  [460, 479, "IN"],
+  [480, 499, "MI"],
+  [500, 528, "IA"],
+  [530, 549, "WI"],
+  [550, 567, "MN"],
+  [570, 577, "SD"],
+  [580, 588, "ND"],
+  [590, 599, "MT"],
+  [600, 629, "IL"],
+  [630, 658, "MO"],
+  [660, 679, "KS"],
+  [680, 693, "NE"],
+  [700, 714, "LA"],
+  [716, 729, "AR"],
+  [730, 749, "OK"],
+  [750, 799, "TX"],
+  [800, 816, "CO"],
+  [820, 831, "WY"],
+  [832, 838, "ID"],
+  [840, 847, "UT"],
+  [850, 865, "AZ"],
+  [870, 884, "NM"],
+  [885, 885, "TX"],
+  [889, 898, "NV"],
+  [900, 961, "CA"],
+  [967, 968, "HI"],
+  [970, 979, "OR"],
+  [980, 994, "WA"],
+  [995, 999, "AK"],
+];
+
+/** Metro/county 3-digit ZIP overrides where local sales tax or gas differs from the state baseline. */
+const ZIP3_OVERRIDES: Record<number, { region?: string; taxRate?: number; gasOffset?: number }> = {
+  100: { region: "New York City, NY", taxRate: 8.875, gasOffset: 0.28 },
+  101: { region: "New York City, NY", taxRate: 8.875, gasOffset: 0.28 },
+  102: { region: "New York City, NY", taxRate: 8.875, gasOffset: 0.28 },
+  103: { region: "Staten Island, NY", taxRate: 8.875, gasOffset: 0.25 },
+  104: { region: "Bronx, NY", taxRate: 8.875, gasOffset: 0.25 },
+  105: { region: "Westchester, NY", taxRate: 8.375, gasOffset: 0.25 },
+  106: { region: "White Plains, NY", taxRate: 8.375, gasOffset: 0.25 },
+  107: { region: "Yonkers, NY", taxRate: 8.875, gasOffset: 0.25 },
+  108: { region: "New Rochelle, NY", taxRate: 8.375, gasOffset: 0.25 },
+  110: { region: "Queens / Nassau, NY", taxRate: 8.625, gasOffset: 0.22 },
+  111: { region: "Queens, NY", taxRate: 8.875, gasOffset: 0.25 },
+  112: { region: "Brooklyn, NY", taxRate: 8.875, gasOffset: 0.25 },
+  113: { region: "Queens, NY", taxRate: 8.875, gasOffset: 0.25 },
+  114: { region: "Queens, NY", taxRate: 8.875, gasOffset: 0.25 },
+  115: { region: "Nassau County, NY", taxRate: 8.625, gasOffset: 0.2 },
+  116: { region: "Queens, NY", taxRate: 8.875, gasOffset: 0.25 },
+  117: { region: "Suffolk County, NY", taxRate: 8.625, gasOffset: 0.18 },
+  118: { region: "Nassau County, NY", taxRate: 8.625, gasOffset: 0.2 },
+  119: { region: "Suffolk County, NY", taxRate: 8.625, gasOffset: 0.22 },
+  122: { region: "Albany, NY", taxRate: 8.0, gasOffset: 0.12 },
+  132: { region: "Syracuse, NY", taxRate: 8.0, gasOffset: 0.12 },
+  142: { region: "Buffalo, NY", taxRate: 8.75, gasOffset: 0.15 },
+  146: { region: "Rochester, NY", taxRate: 8.0, gasOffset: 0.14 },
+  152: { region: "Pittsburgh, PA", taxRate: 7.0, gasOffset: 0.22 },
+  191: { region: "Philadelphia, PA", taxRate: 8.0, gasOffset: 0.22 },
+  606: { region: "Chicago, IL", taxRate: 9.5, gasOffset: 0.45 },
+  900: { region: "Los Angeles, CA", taxRate: 9.5, gasOffset: 1.45 },
+  921: { region: "San Diego, CA", taxRate: 7.75, gasOffset: 1.4 },
+  941: { region: "San Francisco, CA", taxRate: 8.625, gasOffset: 1.5 },
+  981: { region: "Seattle, WA", taxRate: 10.25, gasOffset: 0.95 },
+};
+
+export function stateFromZip(zip: string): string | null {
+  const clean = zip.trim();
+  if (!/^\d{5}$/.test(clean)) return null;
+  const prefix = parseInt(clean.slice(0, 3), 10);
+  for (const [min, max, st] of ZIP_PREFIX_RANGES) {
+    if (prefix >= min && prefix <= max) return st;
+  }
+  return null;
+}
+
+/**
+ * Look up local sales tax rate, trade-in tax credit rule, and regular gas price for a 5-digit US ZIP code.
+ * Uses `nationalRegularGas` when provided (e.g. from the live EIA/EPA fuel price feed), else the baseline average.
+ */
+export function lookupZipRates(zip: string, nationalRegularGas = DEFAULT_NATIONAL_GAS): ZipRateInfo | null {
+  const clean = zip.trim();
+  const state = stateFromZip(clean);
+  if (!state) return null;
+  const meta = STATE_RATES[state];
+  if (!meta) return null;
+  const prefix = parseInt(clean.slice(0, 3), 10);
+  const override = ZIP3_OVERRIDES[prefix];
+
+  const taxRate = override?.taxRate ?? meta.taxRate;
+  const gasOffset = override?.gasOffset ?? meta.gasOffset;
+  const baseGas = Number.isFinite(nationalRegularGas) && nationalRegularGas > 1 ? nationalRegularGas : DEFAULT_NATIONAL_GAS;
+  const gasPrice = Math.round(Math.max(2.15, baseGas + gasOffset) * 100) / 100;
+
+  return {
+    zip: clean,
+    state,
+    region: override?.region ?? meta.name,
+    taxRate,
+    tradeTaxCredit: meta.tradeTaxCredit,
+    gasPrice,
+  };
+}

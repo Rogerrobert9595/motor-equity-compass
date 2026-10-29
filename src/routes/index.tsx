@@ -51,6 +51,7 @@ import {
   estimateInsuranceDelta,
   estimateMaint,
   fallbackMsrp,
+  lookupZipRates,
   makeFromModel,
   quickDeal,
   SERVICE_PILLS,
@@ -63,7 +64,7 @@ import { findByStock, isVin, SAMPLE_INVENTORY, type Vehicle } from "@/lib/invent
 import { vehicleLookupCache } from "@/lib/lookup-cache";
 import { encodeSummary } from "@/lib/summary-link";
 import { cn } from "@/lib/utils";
-import { lookupVehicleSpecs } from "@/lib/vehicle.functions";
+import { lookupLocalRates, lookupVehicleSpecs } from "@/lib/vehicle.functions";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -156,11 +157,15 @@ function DeskPage() {
   const [presenting, setPresenting] = useState(false);
   const [pinned, setPinned] = useState<{ term: number; cash: number; payment: number; breakeven: number | null; series: SimPoint[] } | null>(null);
   const [lookup, setLookup] = useState("");
+  const [zip, setZip] = useState("");
+  const [zipInfo, setZipInfo] = useState<{ region: string; source: "live" | "regional"; loading?: boolean } | null>(null);
   const { user, signOut } = useAuth();
   const savedDeals = useSavedDeals();
   const vinReq = useRef(0);
+  const zipReq = useRef(0);
   const skipAutoInsRef = useRef(false);
   const specs = useServerFn(lookupVehicleSpecs);
+  const fetchLocalRates = useServerFn(lookupLocalRates);
 
   const setD = <K extends keyof DealInputs>(k: K) => (v: DealInputs[K]) => setDeal((d) => ({ ...d, [k]: v }));
   const setC = <K extends keyof CurrentInputs>(k: K) => (v: CurrentInputs[K]) => setCurrent((c) => ({ ...c, [k]: v }));
@@ -263,6 +268,62 @@ function DeskPage() {
     });
     setCurrent((c) => (c.insDelta === insDelta ? c : { ...c, insDelta }));
   }, [selected.stock, selected.price, selected.year, tradeCar]);
+
+  const applyZip = async (rawZip: string, silent = false) => {
+    const clean = rawZip.replace(/\D/g, "").slice(0, 5);
+    if (clean.length !== 5) return;
+    const local = lookupZipRates(clean);
+    if (!local) {
+      if (!silent) toast.error("Enter a valid 5-digit US ZIP code");
+      return;
+    }
+    const id = ++zipReq.current;
+    setDeal((d) => ({ ...d, taxRate: local.taxRate, tradeTaxCredit: local.tradeTaxCredit }));
+    setCurrent((c) => ({ ...c, gasPrice: local.gasPrice }));
+    setZipInfo({ region: local.region, source: "regional", loading: true });
+    try {
+      localStorage.setItem("deal_desk_zip", clean);
+    } catch {
+      /* ignore storage errors */
+    }
+    try {
+      const live = await vehicleLookupCache.get(`zip:${clean}`, () => fetchLocalRates({ data: { zip: clean } }), Boolean);
+      if (id !== zipReq.current || !live) {
+        if (id === zipReq.current) setZipInfo((prev) => (prev ? { ...prev, loading: false } : null));
+        return;
+      }
+      setDeal((d) => ({ ...d, taxRate: live.taxRate, tradeTaxCredit: live.tradeTaxCredit }));
+      setCurrent((c) => ({ ...c, gasPrice: live.gasPrice }));
+      setZipInfo({ region: live.region, source: live.source, loading: false });
+    } catch {
+      if (id === zipReq.current) setZipInfo((prev) => (prev ? { ...prev, loading: false } : null));
+    }
+  };
+
+  const handleZipChange = (val: string) => {
+    const clean = val.replace(/\D/g, "").slice(0, 5);
+    setZip(clean);
+    if (clean.length === 5) {
+      void applyZip(clean);
+    } else {
+      zipReq.current++;
+      setZipInfo(null);
+    }
+  };
+
+  // Restore saved dealership/customer ZIP on mount so local sales tax and gas price are pre-filled.
+  useEffect(() => {
+    try {
+      const savedZip = localStorage.getItem("deal_desk_zip")?.trim() ?? "";
+      if (/^\d{5}$/.test(savedZip)) {
+        setZip(savedZip);
+        void applyZip(savedZip, true);
+      }
+    } catch {
+      /* ignore storage errors */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const askSignIn = (reason: string | null, thenSave = false) => setAuth({ open: true, reason, thenSave });
 
@@ -689,6 +750,34 @@ function DeskPage() {
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">ZIP code (sales tax & gas)</span>
+                    {zipInfo && (
+                      <span className="inline-flex items-center gap-1 text-xs text-primary">
+                        {zipInfo.loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <MapPin className="h-3 w-3" />}
+                        <span className="font-medium">{zipInfo.region}</span>
+                        <span className="num text-muted-foreground">
+                          · {deal.taxRate}% tax · ${current.gasPrice.toFixed(2)}/gal
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      enterKeyHint="done"
+                      maxLength={5}
+                      value={zip}
+                      onChange={(e) => handleZipChange(e.target.value)}
+                      placeholder="Enter 5-digit ZIP (e.g. 14623)"
+                      aria-label="ZIP code for local sales tax and gas price"
+                      className="num h-11 w-full rounded-lg border border-input bg-background/60 pl-9 pr-3 text-base font-medium outline-none placeholder:font-sans placeholder:font-normal placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/30"
+                    />
+                  </div>
+                </div>
                 <Field label="Sales tax">
                   <NumInput label="Sales tax rate" value={deal.taxRate} onChange={setD("taxRate")} suffix="%" decimals={3} />
                 </Field>
@@ -800,11 +889,35 @@ function DeskPage() {
                     </div>
                   )}
                 </div>
-                <div className="col-span-2">
-                  <Field label="Gas price">
-                    <NumInput label="Gas price per gallon" value={current.gasPrice} onChange={setC("gasPrice")} prefix="$" suffix="/gal" />
-                  </Field>
-                </div>
+                <Field label="ZIP code">
+                  <div className="relative">
+                    <MapPin className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      enterKeyHint="done"
+                      maxLength={5}
+                      value={zip}
+                      onChange={(e) => handleZipChange(e.target.value)}
+                      placeholder="5-digit ZIP"
+                      aria-label="ZIP code for local gas price and sales tax"
+                      className="num h-11 w-full rounded-lg border border-input bg-background/60 pl-8 pr-3 text-base font-medium outline-none placeholder:font-sans placeholder:font-normal placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/30"
+                    />
+                  </div>
+                </Field>
+                <Field label="Gas price">
+                  <NumInput label="Gas price per gallon" value={current.gasPrice} onChange={setC("gasPrice")} prefix="$" suffix="/gal" />
+                </Field>
+                {zipInfo && (
+                  <div className="col-span-2 -mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                    {zipInfo.loading ? <Loader2 className="h-3 w-3 animate-spin text-primary" /> : <MapPin className="h-3 w-3 text-primary" />}
+                    <span>
+                      Local rates for <strong className="text-foreground">{zipInfo.region}</strong>: gas{" "}
+                      <strong className="num text-foreground">${current.gasPrice.toFixed(2)}/gal</strong> · sales tax{" "}
+                      <strong className="num text-foreground">{deal.taxRate}%</strong>
+                    </span>
+                  </div>
+                )}
                 <div className="col-span-2">
                   <SliderField
                     label="Insurance change"
